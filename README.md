@@ -1,10 +1,10 @@
-# Panorama API 
+# CONSTRUCTION PROJECT API 
 
 ## Introduction
 
 - Minimum Go Requirement 1.13
 
-``` ~ git clone https://pieter-rebel-works@bitbucket.org/rebelworksco/panorama.git```
+``` ~ https://github.com/fendys01/Construction-Project.git```
 
 
 - COPY config.json.example TO config.json
@@ -60,7 +60,7 @@ There is 3 channel that will be used on this api:
 - tc_mobile_app
 
 
-# BUILD DOCKER IMAGE for Panorama API
+# BUILD DOCKER IMAGE for Construction API
 
 ## prerequisite
 - docker version 19.+
