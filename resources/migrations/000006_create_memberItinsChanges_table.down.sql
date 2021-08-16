@@ -1,0 +1,1 @@
+drop table if exists member_itin_changes;

@@ -1,0 +1,26 @@
+#!/bin/bash
+
+if [ -z "$1" ]
+then
+    echo "\$1 input is empty"
+else
+echo "build latest"
+cd /Users/irvanresna/go/src/panorama
+docker build --no-cache -t dbo/core-services:latest .
+echo "taging version $1"
+docker tag dbo/core-services:latest 011876906689.dkr.ecr.us-west-2.amazonaws.com/dbo/core-services:$1
+echo "make sure you are logged in"
+aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 011876906689.dkr.ecr.us-west-2.amazonaws.com
+echo "push image"
+docker push 011876906689.dkr.ecr.us-west-2.amazonaws.com/dbo/core-services:$1
+
+#! ssh and run deployment script on stage server
+echo "deploy on stage server"
+cd /Users/irvanresna/Downloads
+sudo ssh  -i rebeldbo_ou.pem ec2-user@34.220.181.52 <<EOF
+./deploy-panorama.sh $1
+exit
+EOF
+fi
+
+

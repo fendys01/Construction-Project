@@ -1,0 +1,50 @@
+{
+    "app": {
+        "debug": true,
+        "host": "127.0.0.1:3000",
+        "locale": "id|en",
+        "key": ""
+    },
+    "db": {
+        "psql_dsn": "user:password@tcp(localhost:3306)/dbname?charset=utf8&parseTime=True&loc=Local",
+        "redis": {
+            "addr": "localhost:6379",
+            "password": "",
+            "default_db": 0
+        }
+    },
+    "queue": {
+        "rabbitmq": {
+            "host": ""
+        }
+    },
+    "log": {
+        "default": "file|sentry",
+        "file": {
+            "source": "storages/logs"
+        },
+        "sentry": {
+            "source": ""
+        }
+    },
+    "upload_path": "./storages/uploads", 
+    "aws": {
+        "s3": {
+            "key": "",
+            "secret": "",
+            "region": "",
+            "bucket": "",
+            "public_url": ""
+        }
+    },
+    "mail":{
+        "drive": "smtp",
+        "host": "smtp.gmail.com",
+        "port": 587,
+        "username": "",
+        "password": "",
+        "ecryption": "tls",
+        "mail_from": "do-not-reply@panorama.com",
+        "mail_name": "mail name"
+    }
+}
