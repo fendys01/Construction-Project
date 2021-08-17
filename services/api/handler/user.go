@@ -1,10 +1,10 @@
 package handler
 
 import (
+	"Contruction-Project/services/api/handler/response"
+	"Contruction-Project/services/api/model"
 	"context"
 	"net/http"
-	"panorama/services/api/handler/response"
-	"panorama/services/api/model"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
