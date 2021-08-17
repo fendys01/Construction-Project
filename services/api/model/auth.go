@@ -32,9 +32,9 @@ const (
 )
 
 var tokenMailSubj = map[string]string{
-	ActForgotPass:  "[Panorama] Forgot Password",
-	ActRegEmail:    "[Panorama] Email Verification",
-	ActChangeEmail: "[Panorama] Change Email Verification",
+	ActForgotPass:  "[Construction-Project] Forgot Password",
+	ActRegEmail:    "[Construction-Project] Email Verification",
+	ActChangeEmail: "[Construction-Project] Change Email Verification",
 }
 
 var errInvalidCred error = fmt.Errorf("%s", "invalid user credential")

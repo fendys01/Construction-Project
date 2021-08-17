@@ -4,11 +4,11 @@ config.json
 tmp
 air
 .air.conf
-panorama
+Construction-Project
 chi-rest
 .DS_Store
 .ServiceAccountKey.json
 ./.idea
 .vscode/
 out
-panorama
+Construction-Project

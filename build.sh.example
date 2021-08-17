@@ -5,7 +5,7 @@ then
     echo "\$1 input is empty"
 else
 echo "build latest"
-cd /Users/irvanresna/go/src/panorama
+cd /Users/irvanresna/go/src/Construction-Project
 docker build --no-cache -t dbo/core-services:latest .
 echo "taging version $1"
 docker tag dbo/core-services:latest 011876906689.dkr.ecr.us-west-2.amazonaws.com/dbo/core-services:$1
@@ -18,7 +18,7 @@ docker push 011876906689.dkr.ecr.us-west-2.amazonaws.com/dbo/core-services:$1
 echo "deploy on stage server"
 cd /Users/irvanresna/Downloads
 sudo ssh  -i rebeldbo_ou.pem ec2-user@34.220.181.52 <<EOF
-./deploy-panorama.sh $1
+./deploy-Construction-Project.sh $1
 exit
 EOF
 fi

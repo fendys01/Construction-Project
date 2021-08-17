@@ -10,7 +10,7 @@ FROM golang@sha256:0046254e021d5f1e26c844daac1ee406e382ac4a0f6c2e79593492ef1d906
 # Ca-certificates is required to call HTTPS endpoints.
 RUN apk update && apk add --no-cache git ca-certificates tzdata && update-ca-certificates
 
-WORKDIR $GOPATH/src/panorama
+WORKDIR $GOPATH/src/Construction-Project
 COPY . .
 
 RUN echo $PWD && ls -lah
@@ -21,7 +21,7 @@ RUN go mod download
 RUN go mod verify
 
 #CMD go build -v
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o /go/bin/panorama .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o /go/bin/Construction-Project .
 
 #####################
 # MAKE SMALL BINARY #
@@ -36,4 +36,4 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /etc/passwd /etc/passwd
 
 # Copy the executable.
-COPY --from=builder /go/bin/panorama /go/bin/panorama
+COPY --from=builder /go/bin/Construction-Project /go/bin/Construction-Project
