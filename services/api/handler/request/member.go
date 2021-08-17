@@ -1,6 +1,6 @@
 package request
 
-import "panorama/services/api/model"
+import "Contruction-Project/services/api/model"
 
 // AddMemberReq ...
 type AddMemberReq struct {

@@ -1,7 +1,7 @@
 package response
 
 import (
-	"panorama/services/api/model"
+	"Contruction-Project/services/api/model"
 )
 
 // UsersResponse ...
