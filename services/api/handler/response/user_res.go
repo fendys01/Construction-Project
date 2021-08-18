@@ -1,15 +1,19 @@
 package response
 
 import (
-	"Contruction-Project/services/api/model"
+	"panorama/services/api/model"
+
+	"github.com/andanhm/go-prettytime"
+	"github.com/spf13/viper"
 )
 
 // UsersResponse ...
 type UsersResponse struct {
-	UserCode      string `json:"user_code"`
-	Name          string `json:"name"`
-	Email         string `json:"email"`
-	Phone         string `json:"phone"`
+	UserCode string `json:"user_code"`
+	Name     string `json:"name"`
+	Phone    string `json:"phone"`
+	Email    string `json:"email"`
+	// Password      string `json:"password"`
 	Img           string `json:"image"`
 	Role          string `json:"role"`
 	LastVisitDate string `json:"last_visit_date"`
@@ -19,86 +23,205 @@ type UsersResponse struct {
 // Transform from member model to member response
 func (r UsersResponse) Transform(m model.UserEnt) UsersResponse {
 
+	var t string
+	if m.LastVisit.Valid {
+		t = m.LastVisit.Time.Format("Jan 02,2006")
+	}
+
+	if len(m.Img.String) > 0 {
+		if IsUrl(m.Img.String) {
+			r.Img = m.Img.String
+		} else {
+			r.Img = viper.GetString("aws.s3.public_url") + m.Img.String
+		}
+
+	} else {
+		r.Img = ""
+	}
+
 	r.UserCode = m.UserCode
 	r.Name = m.Name
-	r.Email = m.Email
 	r.Phone = m.Phone
-	r.Img = m.Img.String
-	r.LastVisitDate = m.LastVisit.Format("Jan 02,2006")
-	r.TotalClient = m.TotalClient
+	r.Email = m.Email
+	// r.Password = m.Password
+	r.Role = m.Role
+	r.LastVisitDate = t
+	r.TotalClient = m.TotalClient.Int32
 
 	return r
 }
 
-// MemberResponse ...
-type UsersDetailResponse struct {
-	UserCode           string               `json:"user_code"`
-	Name               string               `json:"name"`
-	Email              string               `json:"email"`
-	Phone              string               `json:"phone"`
-	Img                string               `json:"image"`
-	DetailActivityUser DetailActivityUser   `json:"detail_activity"`
-	RecentActivityUser []RecentActivityUser `json:"recent_activity"`
+// TcDetailResponse ...
+type TcDetailResponse struct {
+	UserCode              string                  `json:"user_code"`
+	Name                  string                  `json:"name"`
+	Email                 string                  `json:"email"`
+	Phone                 string                  `json:"phone"`
+	Img                   string                  `json:"image"`
+	SummaryActivityTc     SummaryActivityTc       `json:"summary_activity"`
+	RecentActivityUser    []RecentActivityUser    `json:"log_activity_user"`
+	ActiveClientConsultan []ActiveClientConsultan `json:"active_client_consultan"`
 }
 
-// Transform from member model to member response
-func (r UsersDetailResponse) Transform(m model.UserEnt) UsersDetailResponse {
+// TcDetailResponse ...
+func (r TcDetailResponse) Transform(m model.UserEnt) TcDetailResponse {
 
 	r.UserCode = m.UserCode
 	r.Name = m.Name
 	r.Email = m.Email
 	r.Phone = m.Phone
-	r.Img = m.Img.String
-	r.DetailActivityUser = r.DetailActivityUser.Transform(m)
+	r.SummaryActivityTc = r.SummaryActivityTc.Transform(m)
 
-	// var listResponse []MoreActivityMember
-	// for _, g := range r.MoreActivityMember {
-	// 	var res MoreActivityMember
-	// 	res = res.Transform(g)
-	// 	listResponse = append(listResponse, res)
-	// }
-	var l []RecentActivityUser
-	var res RecentActivityUser
-	l = append(l, res.Transform())
-	r.RecentActivityUser = l
+	if len(m.Img.String) > 0 {
+		if IsUrl(m.Img.String) {
+			r.Img = m.Img.String
+		} else {
+			r.Img = viper.GetString("aws.s3.public_url") + m.Img.String
+		}
+
+	} else {
+		r.Img = ""
+	}
+
+	var listResponse []RecentActivityUser
+	for _, g := range m.LogActivityUser {
+		var res RecentActivityUser
+		res = res.Transform(g)
+		listResponse = append(listResponse, res)
+	}
+	var act []ActiveClientConsultan
+	for _, g := range m.ActiveClientConsultan {
+		var resAct ActiveClientConsultan
+		resAct = resAct.Transform(g)
+		act = append(act, resAct)
+	}
+
+	r.RecentActivityUser = listResponse
+	r.ActiveClientConsultan = act
 
 	return r
 }
 
-// DetailActivityMember ...
-type DetailActivityUser struct {
-	TotalClient      int32 `json:"total_client"`
-	OverAllView      int32 `json:"overall_view"`
-	ItineraryCreated int32 `json:"itin_created"`
+// SummaryActivityTc ...
+type SummaryActivityTc struct {
+	TotalClient         int32  `json:"total_client"`
+	TripBooked          int32  `json:"trip_booked"`
+	CustomPackageBooked int32  `json:"custom_package_booked"`
+	LastSeen            string `json:"last_seen"`
+}
+
+// SummaryActivityTc ...
+func (r SummaryActivityTc) Transform(m model.UserEnt) SummaryActivityTc {
+
+	r.TotalClient = m.TotalClient.Int32
+	r.TripBooked = m.TotalOrd.Int32
+	r.CustomPackageBooked = m.TotalCustomOrder.Int32
+	r.LastSeen = prettytime.Format(m.LastVisit.Time)
+
+	return r
+}
+
+// AdminDetailResponse ...
+type AdminDetailResponse struct {
+	UserCode             string               `json:"user_code"`
+	Name                 string               `json:"name"`
+	Email                string               `json:"email"`
+	Img                  string               `json:"image"`
+	SummaryActivityAdmin SummaryActivityAdmin `json:"summary_activity"`
+	RecentActivityUser   []RecentActivityUser `json:"log_activity_user"`
 }
 
 // Transform from member model to member response
-func (r DetailActivityUser) Transform(m model.UserEnt) DetailActivityUser {
+func (r AdminDetailResponse) Transform(m model.UserEnt) AdminDetailResponse {
 
-	r.TotalClient = 30
-	r.OverAllView = 1200
-	r.ItineraryCreated = 100
+	r.UserCode = m.UserCode
+	r.Name = m.Name
+	r.Email = m.Email
+	r.SummaryActivityAdmin = r.SummaryActivityAdmin.Transform(m)
+
+	if len(m.Img.String) > 0 {
+		if IsUrl(m.Img.String) {
+			r.Img = m.Img.String
+		} else {
+			r.Img = viper.GetString("aws.s3.public_url") + m.Img.String
+		}
+
+	} else {
+		r.Img = ""
+	}
+
+	var listResponse []RecentActivityUser
+	for _, g := range m.LogActivityUser {
+		var res RecentActivityUser
+		res = res.Transform(g)
+		listResponse = append(listResponse, res)
+	}
+
+	r.RecentActivityUser = listResponse
+
+	return r
+}
+
+// SummaryActivityAdmin ...
+type SummaryActivityAdmin struct {
+	TotalItinSugView int32  `json:"total_itin_view"`
+	TotalItinCreated int32  `json:"total_itin_created"`
+	LastSeen         string `json:"last_seen"`
+}
+
+// Transform from member model to member response
+func (r SummaryActivityAdmin) Transform(m model.UserEnt) SummaryActivityAdmin {
+
+	r.TotalItinSugView = m.TotalItinSugView.Int32
+	r.TotalItinCreated = m.TotalItinSug.Int32
+	r.LastSeen = prettytime.Format(m.LastVisit.Time)
 
 	return r
 }
 
 // RecentActivityUser ...
 type RecentActivityUser struct {
-	Title       string `json:"title"`
-	TagActivity string `json:"tag_activity"`
-	TagContent  string `json:"tag_content"`
-	Date        string `json:"date"`
-	LastActive  string `json:"last_active"`
+	Title    string `json:"title"`
+	Activity string `json:"activity"`
+	Date     string `json:"date"`
 }
 
-// Transform from member model to member response
-func (r RecentActivityUser) Transform() RecentActivityUser {
+// RecentActivityUser ...
+func (r RecentActivityUser) Transform(log model.LogActivityUserEnt) RecentActivityUser {
 
-	r.Title = "Request For assistan"
-	r.TagActivity = "Trip"
-	r.TagContent = "Summer 2021"
-	r.Date = "2021-08-01"
-	r.LastActive = "Now"
+	var t string
+	if log.CreatedDate.Valid {
+		t = log.CreatedDate.Time.Format("Jan 02,2006")
+	}
+
+	r.Title = log.Title
+	r.Activity = log.Activity
+	r.Date = t
+
+	return r
+}
+
+// ActiveClientConsultan ...
+type ActiveClientConsultan struct {
+	Title      string `json:"title"`
+	Name       string `json:"activity"`
+	NewRequest string `json:"new_req_replacement"`
+	ItinDate   string `json:"itin_date"`
+}
+
+// ActiveClientConsultan ...
+func (r ActiveClientConsultan) Transform(v model.ActiveClientConsultan) ActiveClientConsultan {
+
+	r.Title = v.Title
+	r.Name = v.Name
+
+	if v.TcReplacementDate.Valid {
+		r.NewRequest = "New Request From Tc Replacement"
+		r.ItinDate = v.TcReplacementDate.Time.Format("Jan 02,2006")
+	} else {
+		r.NewRequest = ""
+		r.ItinDate = v.ItinDate.Format("Jan 02,2006")
+	}
 
 	return r
 }

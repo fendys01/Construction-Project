@@ -1,6 +1,6 @@
 package request
 
-import "Contruction-Project/services/api/model"
+import "panorama/services/api/model"
 
 // AddMemberReq ...
 type AddMemberReq struct {
@@ -8,7 +8,7 @@ type AddMemberReq struct {
 	Name           string `json:"name" validate:"required"`
 	Email          string `json:"email" validate:"required,email"`
 	Phone          string `json:"phone" validate:"required"`
-	Img            string `json:"img"`
+	Img            string `json:"image"`
 	Password       string `json:"password" validate:"required"`
 	RetypePassword string `json:"retype_password" validate:"required"`
 }
@@ -19,6 +19,7 @@ type UpdateMemberReq struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`
 	Phone    string `json:"phone"`
+	Img      string `json:"image"`
 }
 
 // Transform MCUserReq to MCUserEnt
@@ -40,10 +41,26 @@ func (u UpdateMemberReq) Transform(m model.MemberEnt) model.MemberEnt {
 		m.Phone = u.Phone
 	}
 
+	if len(u.Img) > 0 {
+		m.Img.String = u.Img
+	}
+
 	return m
 }
 
 // passReq ...
-type passReq struct {
-	Pass string `json:"password"`
+type PassReq struct {
+	OldPassword string `json:"old_password"`
+	Pass        string `json:"password"`
+}
+
+type PassPhoneReq struct {
+	Password       string `json:"password"`
+	Phone          string `json:"phone"`
+	RetypePassword string `json:"retype_password"`
+}
+
+type PassEmailReq struct {
+	Phone string `json:"phone"`
+	Email string `json:"email"`
 }

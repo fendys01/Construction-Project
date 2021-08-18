@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"Contruction-Project/services/api/handler/request"
-	"Contruction-Project/services/api/model"
 	"context"
 	"fmt"
 	"net/http"
+	"panorama/services/api/handler/request"
+	"panorama/services/api/model"
 	"strconv"
 
 	"github.com/go-chi/chi"

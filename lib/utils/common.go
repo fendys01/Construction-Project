@@ -65,6 +65,12 @@ func IsUsernameTag(name string) bool {
 	return re.MatchString(name)
 }
 
+func IsCodeTag(code string) bool {
+	re := regexp.MustCompile(`([a-zA-Z0-9,-]\-?[a-zA-Z0-9,-]\-?)`)
+
+	return re.MatchString(code)
+}
+
 // IsNumeric ...
 func IsNumeric(s string) bool {
 	_, err := strconv.ParseFloat(s, 64)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -18,4 +20,20 @@ func Connect(dsn string) (*pgxpool.Pool, error) {
 	}
 
 	return conn, nil
+}
+
+// Parsing Error
+func ParseErr(err error) string {
+	switch pqe := err.(type) {
+	case *pgconn.PgError:
+
+		// error duplicate
+		if pqe.Code == "23505" {
+			m := strings.ReplaceAll(pqe.Detail, "(", "")
+			m = strings.ReplaceAll(m, ")", "")
+			m = strings.ReplaceAll(m, "=", " = ")
+			return m
+		}
+	}
+	return err.Error()
 }

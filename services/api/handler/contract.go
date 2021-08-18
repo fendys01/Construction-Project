@@ -1,6 +1,6 @@
 package handler
 
-import "Contruction-Project/bootstrap"
+import "panorama/bootstrap"
 
 type (
 	// Contract ...

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/georgysavva/scany/pgxscan"
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -29,11 +30,11 @@ func (c *Contract) GetTags(db *pgxpool.Conn, ctx context.Context) ([]TagEnt, err
 }
 
 // AddMutiTag ...
-func (c *Contract) AddMutiTag(db *pgxpool.Conn, ctx context.Context, t []string) []int32 {
+func (c *Contract) AddMutiTag(tx pgx.Tx, ctx context.Context, t []string) []int32 {
 	var ids []int32
 	var lastInsID int32
 	for _, v := range t {
-		db.QueryRow(context.Background(), "insert into tags (tag_name) values($1) RETURNING id;", v).Scan(&lastInsID)
+		tx.QueryRow(ctx, "insert into tags (tag_name) values($1) RETURNING id;", v).Scan(&lastInsID)
 		ids = append(ids, lastInsID)
 	}
 
@@ -41,7 +42,7 @@ func (c *Contract) AddMutiTag(db *pgxpool.Conn, ctx context.Context, t []string)
 }
 
 // AddMultiSugItinTags ..
-func (c *Contract) AddMultiSugItinTags(db *pgxpool.Conn, ctx context.Context, sug int32, tags []int32) error {
+func (c *Contract) AddMultiSugItinTags(tx pgx.Tx, ctx context.Context, sug int32, tags []int32) error {
 	sql := "insert into itin_suggestion_tags (itin_sug_id, tag_id) values "
 
 	var arrStr []string
@@ -51,16 +52,16 @@ func (c *Contract) AddMultiSugItinTags(db *pgxpool.Conn, ctx context.Context, su
 
 	sql = sql + strings.Join(arrStr, ",")
 
-	_, err := db.Exec(context.Background(), sql)
+	_, err := tx.Exec(context.Background(), sql)
 
 	return err
 }
 
 // DelSugItinTagsBySugItinID delete all tags of suggestion by suggestion id
-func (c *Contract) DelSugItinTagsBySugItinID(db *pgxpool.Conn, ctx context.Context, sugItinID int32) error {
+func (c *Contract) DelSugItinTagsBySugItinID(tx pgx.Tx, ctx context.Context, sugItinID int32) error {
 	sql := `delete from itin_suggestion_tags where itin_sug_id=$1;`
 
-	_, err := db.Exec(context.Background(), sql, sugItinID)
+	_, err := tx.Exec(context.Background(), sql, sugItinID)
 
 	return err
 }

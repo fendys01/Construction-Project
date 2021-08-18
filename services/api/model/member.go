@@ -6,32 +6,41 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"Contruction-Project/lib/utils"
+	"panorama/lib/utils"
 	"strings"
 	"time"
 
 	"github.com/georgysavva/scany/pgxscan"
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // MemberEnt ...
 type MemberEnt struct {
-	ID             int32
-	MemberCode     string
-	Name           string
-	Username       string
-	Email          string
-	Phone          string
-	Password       string
-	Img            sql.NullString
-	IsEmailValid   bool `db:"is_valid_email"`
-	IsPhoneValid   bool `db:"is_valid_phone"`
-	IsActive       bool `db:"is_active"`
-	CreatedDate    time.Time
-	UpdatedDate    time.Time
-	LastActiveDate sql.NullTime
-	TotalVisited   int32
+	ID              int32
+	MemberCode      string
+	Name            string
+	Username        string
+	Email           string
+	Phone           string
+	Password        string
+	Img             sql.NullString
+	IsEmailValid    bool `db:"is_valid_email"`
+	IsPhoneValid    bool `db:"is_valid_phone"`
+	IsActive        bool `db:"is_active"`
+	CreatedDate     time.Time
+	UpdatedDate     time.Time
+	LogActivityUser []LogActivityUserEnt
+	MemberStatistik MemberStatistikEnt
+}
+
+// MemberStatistikEnt ...
+type MemberStatistikEnt struct {
+	LastActiveDate          sql.NullTime
+	TotalVisited            sql.NullInt32
+	TotalTc                 sql.NullInt32
+	TotalCompletedItinerary sql.NullInt32
 }
 
 func (c *Contract) createMemberCode() string {
@@ -49,14 +58,14 @@ func (c *Contract) ActivateAndSetPhoneValid(db *pgxpool.Conn, ctx context.Contex
 }
 
 // AddMember registering the member and add to database
-func (c *Contract) AddMember(db *pgxpool.Conn, ctx context.Context, m MemberEnt) (MemberEnt, error) {
+func (c *Contract) AddMember(tx pgx.Tx, ctx context.Context, m MemberEnt) (MemberEnt, error) {
 	// TODO: need to check is email, @username, phone is exist or not
 
 	var lastInsID int32
 	pass, _ := bcrypt.GenerateFromPassword([]byte(m.Password), 10)
 	m.MemberCode = c.createMemberCode()
 
-	err := db.QueryRow(ctx, `insert into members (member_code, name, username, email, phone, password, img,is_active, created_date,updated_date) 
+	err := tx.QueryRow(ctx, `insert into members (member_code, name, username, email, phone, password, img,is_active, created_date,updated_date) 
 		values($1, $2, $3, $4, $5, $6, $7,$8,$9,$10) RETURNING id`,
 		m.MemberCode, m.Name, m.Username, m.Email, m.Phone, pass, m.Img, m.IsActive, time.Now().In(time.UTC), time.Now().In(time.UTC),
 	).Scan(&lastInsID)
@@ -78,11 +87,47 @@ func (c *Contract) GetMemberBy(db *pgxpool.Conn, ctx context.Context, field, use
 
 func (c *Contract) GetMemberByCode(db *pgxpool.Conn, ctx context.Context, code string) (MemberEnt, error) {
 	var m MemberEnt
-	err := pgxscan.Get(ctx, db, &m, `select 
-									 members.id, member_code, name, username, email, phone, img, is_valid_email, 
-									 is_valid_phone, is_active, l.last_active_date, total_visited
-									 from members 
-									 JOIN log_visit_app l on l.member_id = members.id where member_code=$1 limit 1 `, code)
+	sql := `select 
+				members.id, member_code, name, username, email, phone, 
+				img, is_valid_email, is_valid_phone, is_active, l.last_active_date, l.total_visited
+			from members 
+			left join log_visit_app l on l.user_id = members.id
+			where member_code=$1 and l.role = 'customer' and is_active = 'true'`
+	err := db.QueryRow(ctx, sql, code).Scan(&m.ID, &m.MemberCode, &m.Name, &m.Username, &m.Email, &m.Phone, &m.Img, &m.IsEmailValid, &m.IsPhoneValid, &m.IsActive, &m.MemberStatistik.LastActiveDate, &m.MemberStatistik.TotalVisited)
+
+	return m, err
+}
+
+func (c *Contract) GetMemberStatistikByCode(db *pgxpool.Conn, ctx context.Context, code string) (MemberEnt, error) {
+	var m MemberEnt
+	sql := `
+	select 
+		COUNT(CASE WHEN total_order = 0 THEN null else a.* END) as  total_tc,
+		SUM(total_order) as total_itenerary,
+		total_visited,
+		member_code, name,img, last_active_date  
+	from (
+		select 
+			member_code, members.name, members.img, l.last_active_date, total_visited,
+			COUNT(CASE WHEN o.order_status = 'C' THEN order_status END) as total_order
+		from members 
+		left join member_itins mi on mi.created_by = members.id
+		left join log_visit_app l on l.user_id = members.id
+		left join orders o on o.member_itin_id = mi.id
+		left join users us on us.id = o.tc_id
+		where member_code =  $1 and l.role = 'customer'
+		group by tc_id, members.id, l.id
+	)a 
+	group by total_visited, member_code, name, img,last_active_date`
+
+	var a, b int32
+
+	err := db.QueryRow(ctx, sql, code).Scan(
+		&a, &b, &m.MemberStatistik.TotalVisited,
+		&m.MemberCode, &m.Name, &m.Img, &m.MemberStatistik.LastActiveDate)
+
+	m.MemberStatistik.TotalTc.Int32 = a
+	m.MemberStatistik.TotalCompletedItinerary.Int32 = b
 
 	return m, err
 }
@@ -141,14 +186,11 @@ func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param ma
 
 	if len(param["keyword"].(string)) > 0 {
 		var orWhere []string
-		orWhere = append(orWhere, "name like ?")
-		paramQuery = append(paramQuery, "%"+param["keyword"].(string)+"%")
-		orWhere = append(orWhere, "username like ?")
-		paramQuery = append(paramQuery, "%"+param["keyword"].(string)+"%")
-		orWhere = append(orWhere, "phone like ?")
-		paramQuery = append(paramQuery, "%"+param["keyword"].(string)+"%")
-		orWhere = append(orWhere, "member_code like ?")
-		paramQuery = append(paramQuery, "%"+param["keyword"].(string)+"%")
+
+		orWhere = append(orWhere, "name like '%"+param["keyword"].(string)+"%'")
+		orWhere = append(orWhere, "username like '%"+param["keyword"].(string)+"%'")
+		orWhere = append(orWhere, "phone like '%"+param["keyword"].(string)+"%'")
+		orWhere = append(orWhere, "member_code like '%"+param["keyword"].(string)+"%'")
 
 		where = append(where, "("+strings.Join(orWhere, " OR ")+")")
 	}
@@ -156,7 +198,8 @@ func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param ma
 	sql := `SELECT members.id, member_code, name, username, email, phone, img, is_valid_email, 
 			is_valid_phone, is_active, l.last_active_date, total_visited
 			from members
-			JOIN log_visit_app l on l.member_id = members.id`
+			LEFT JOIN log_visit_app l on l.user_id = members.id
+			where l.role = 'customer' and is_active = true `
 
 	var q string = sql
 
@@ -189,6 +232,7 @@ func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param ma
 		paramQuery = append(paramQuery, param["limit"])
 	}
 
+	fmt.Println(q, paramQuery)
 	rows, err := db.Query(ctx, q, paramQuery...)
 	if err != nil {
 		return list, err
@@ -198,7 +242,7 @@ func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param ma
 
 	for rows.Next() {
 		var a MemberEnt
-		err = rows.Scan(&a.ID, &a.MemberCode, &a.Name, &a.Username, &a.Email, &a.Phone, &a.Img, &a.IsEmailValid, &a.IsPhoneValid, &a.IsActive, &a.LastActiveDate.Time, &a.TotalVisited)
+		err = rows.Scan(&a.ID, &a.MemberCode, &a.Name, &a.Username, &a.Email, &a.Phone, &a.Img, &a.IsEmailValid, &a.IsPhoneValid, &a.IsActive, &a.MemberStatistik.LastActiveDate, &a.MemberStatistik.TotalVisited)
 		if err != nil {
 			return list, err
 		}
@@ -221,7 +265,7 @@ func (c *Contract) UpdateMember(db *pgxpool.Conn, code string, m MemberEnt) (Mem
 			img = $5,
 			updated_date = $6
 			WHERE member_code = $7;`
-	_, err := db.Exec(context.Background(), sql, m.Name, m.Username, m.Email, m.Phone, m.Img, time.Now().In(time.UTC), code)
+	_, err := db.Exec(context.Background(), sql, m.Name, m.Username, m.Email, m.Phone, m.Img.String, time.Now().In(time.UTC), code)
 	if err != nil {
 		return m, err
 	}
@@ -230,26 +274,46 @@ func (c *Contract) UpdateMember(db *pgxpool.Conn, code string, m MemberEnt) (Mem
 }
 
 // GetLogVisitApp ...
-func (c *Contract) GetLogVisitApp(db *pgxpool.Conn, ctx context.Context, id int32) (time.Time, int32, error) {
+func (c *Contract) GetLogVisitApp(db *pgxpool.Conn, ctx context.Context, id int32, role string) (int32, time.Time, int32, error) {
 	var a time.Time
 	var i int32
-	err := db.QueryRow(ctx, "SELECT last_active_date, total_visited FROM log_visit_app  WHERE member_id = $1 ", id).Scan(&a, &i)
-	return a, i, err
+	var idLog int32
+	err := db.QueryRow(ctx, "SELECT id, last_active_date, total_visited FROM log_visit_app  WHERE user_id = $1 and role = $2 order by id desc limit 1", id, role).Scan(&idLog, &a, &i)
+	return idLog, a, i, err
 }
 
 // add new log visit app
-func (c *Contract) AddNewLogVisitApp(db *pgxpool.Conn, ctx context.Context, id int32) error {
+func (c *Contract) AddNewLogVisitApp(tx pgx.Tx, ctx context.Context, id int32, role string) error {
 
-	sql := `insert into log_visit_app (member_id,total_visited, last_active_date) values($1,$2, $3);`
-	_, err := db.Exec(ctx, sql, id, 1, time.Now().In(time.UTC))
+	var ID int32
+	sql := `insert into log_visit_app (user_id,role,total_visited, last_active_date) values($1,$2, $3, null) RETURNING id;`
+	err := tx.QueryRow(ctx, sql, id, role, 0).Scan(&ID)
 
 	return err
 }
 
-// ActivateAndSetPhoneValid ...
-func (c *Contract) UpdateTotalVisited(db *pgxpool.Conn, ctx context.Context, id int32, total int32) error {
-	sql := `update log_visit_app set total_visited=$1, last_active_date=$2 where member_id=$3;`
-	_, err := db.Exec(ctx, sql, total, time.Now().In(time.UTC), id)
+// UpdateTotalVisited ...
+func (c *Contract) UpdateTotalVisited(db *pgxpool.Conn, ctx context.Context, id int32, total int32, role string, id_log int32) error {
+	sql := `update log_visit_app set total_visited=$1, last_active_date=$2 where user_id=$3 and role=$4 and id = $5;`
+	_, err := db.Exec(ctx, sql, total, time.Now().In(time.UTC), id, role, id_log)
+
+	return err
+}
+
+// UpdatePhoneMember ...
+func (c *Contract) UpdatePhoneMember(db *pgxpool.Conn, ctx context.Context, phone string, code string) error {
+	sql := `UPDATE members SET phone = $1, is_active = $2, is_valid_phone = $3, updated_date = $4 WHERE member_code = $5;`
+	_, err := db.Exec(ctx, sql, phone, true, true, time.Now().In(time.UTC), code)
+
+	return err
+}
+
+// add log visit app
+func (c *Contract) AddLogVisitApp(db *pgxpool.Conn, ctx context.Context, id int32, role string) error {
+
+	var ID int32
+	sql := `insert into log_visit_app (user_id,role,total_visited, last_active_date) values($1,$2, $3, $4) RETURNING id;`
+	err := db.QueryRow(ctx, sql, id, role, 1, time.Now().In(time.UTC)).Scan(&ID)
 
 	return err
 }

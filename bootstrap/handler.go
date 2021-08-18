@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"Contruction-Project/lib/utils"
+	"panorama/lib/utils"
 
 	validator "github.com/go-playground/validator/v10"
 )

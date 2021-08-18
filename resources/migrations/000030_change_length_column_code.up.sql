@@ -1,0 +1,1 @@
+ALTER TABLE users ALTER user_code TYPE varchar(20);

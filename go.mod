@@ -1,11 +1,13 @@
-module Contruction-Project
+module panorama
 
 go 1.15
 
 require (
+	github.com/AgoraIO/Tools/DynamicKey/AgoraDynamicKey/go/src v0.0.0-20210720085833-2603e2055b1f
 	github.com/andanhm/go-prettytime v1.1.0
 	github.com/aws/aws-sdk-go v1.38.51
 	github.com/certifi/gocertifi v0.0.0-20210507211836-431795d63e8d // indirect
+	github.com/cheekybits/is v0.0.0-20150225183255-68e9c0620927 // indirect
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/dongri/phonenumber v0.0.0-20210304071411-690733f34185
 	github.com/evalphobia/logrus_sentry v0.8.2
@@ -21,12 +23,14 @@ require (
 	github.com/go-playground/validator/v10 v10.6.1
 	github.com/go-redis/redis/v8 v8.9.0
 	github.com/golang/protobuf v1.4.3 // indirect
+	github.com/jackc/pgconn v1.8.1
 	github.com/jackc/pgx/v4 v4.11.0
 	github.com/lib/pq v1.8.0 // indirect
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/viper v1.7.1
 	github.com/streadway/amqp v1.0.0
 	github.com/urfave/cli/v2 v2.3.0
+	github.com/veritrans/go-midtrans v0.0.0-20210616100512-16326c5eeb00
 	github.com/xhit/go-simple-mail/v2 v2.9.1
 	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
 	golang.org/x/sys v0.0.0-20210309074719-68d13333faf2 // indirect

@@ -1,7 +1,7 @@
 package model
 
 import (
-	"Contruction-Project/bootstrap"
+	"panorama/bootstrap"
 )
 
 type (

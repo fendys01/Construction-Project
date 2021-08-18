@@ -1,19 +1,20 @@
 package handler
 
 import (
-	"Contruction-Project/lib/array"
-	"Contruction-Project/services/api/handler/request"
-	"Contruction-Project/services/api/handler/response"
-	"Contruction-Project/services/api/model"
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
+	"panorama/lib/array"
+	"panorama/lib/psql"
+	"panorama/services/api/handler/request"
+	"panorama/services/api/handler/response"
+	"panorama/services/api/model"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // AddMemberAct ...
@@ -43,8 +44,18 @@ func (h *Contract) AddMemberAct(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Release()
 
+	if req.Password != req.RetypePassword {
+		h.SendBadRequest(w, "Password is not match")
+		return
+	}
+
 	m := model.Contract{App: h.App}
-	member, err := m.AddMember(db, ctx, model.MemberEnt{
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	member, err := m.AddMember(tx, ctx, model.MemberEnt{
 		Username: req.Username,
 		Name:     req.Name,
 		Email:    req.Email,
@@ -60,6 +71,20 @@ func (h *Contract) AddMemberAct(w http.ResponseWriter, r *http.Request) {
 
 	var res response.MemberResponse
 	res = res.Transform(member)
+
+	err = m.AddNewLogVisitApp(tx, ctx, member.ID, "customer")
+	if err != nil {
+		tx.Rollback(ctx)
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// Commit transaction
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
 
 	h.SendSuccess(w, res, nil)
 }
@@ -81,12 +106,48 @@ func (h *Contract) GetMember(w http.ResponseWriter, r *http.Request) {
 	defer db.Release()
 
 	m := model.Contract{App: h.App}
-	// return single user (get by user code)
 	u, err := m.GetMemberByCode(db, ctx, code)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
 	}
+
+	var res response.MemberResponse
+	res = res.Transform(u)
+
+	h.SendSuccess(w, res, nil)
+}
+
+// GetMemberStatistik ...
+func (h *Contract) GetMemberStatistik(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	if len(code) == 0 {
+		h.SendBadRequest(w, "invalid code")
+		return
+	}
+
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	m := model.Contract{App: h.App}
+	u, err := m.GetMemberStatistikByCode(db, ctx, code)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	log, err := m.GetListLogActivity(db, ctx, "customer", code)
+	if err != nil && err == sql.ErrNoRows {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	u.LogActivityUser = log
 
 	var res response.MemberDetailResponse
 	res = res.Transform(u)
@@ -150,6 +211,7 @@ func (h *Contract) GetMemberList(w http.ResponseWriter, r *http.Request) {
 		h.SendBadRequest(w, err.Error())
 		return
 	}
+
 	var listResponse []response.MemberResponse
 	for _, a := range members {
 		var res response.MemberResponse
@@ -201,7 +263,7 @@ func (h *Contract) UpdateMember(w http.ResponseWriter, r *http.Request) {
 
 	member, err := m.UpdateMember(db, mcode, data)
 	if err != nil {
-		h.SendBadRequest(w, err.Error())
+		h.SendBadRequest(w, psql.ParseErr(err))
 		return
 	}
 
@@ -212,10 +274,12 @@ func (h *Contract) UpdateMember(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// UpdateUserPass ...
-func (h *Contract) UpdateMemberPass(w http.ResponseWriter, r *http.Request) {
+// UpdateMemberPassPhoneAct is handler for handling update pass or phone member
+func (h *Contract) UpdateMemberPassPhoneAct(w http.ResponseWriter, r *http.Request) {
 	var err error
-	req := passReq{}
+
+	// Check each request
+	req := request.PassPhoneReq{}
 	if err = h.Bind(r, &req); err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
@@ -224,19 +288,23 @@ func (h *Contract) UpdateMemberPass(w http.ResponseWriter, r *http.Request) {
 		h.SendRequestValidationError(w, err.(validator.ValidationErrors))
 		return
 	}
+	if req.Password == "" && req.Phone == "" {
+		h.SendBadRequest(w, "no request found.")
+		return
+	}
+	if (req.Password != "" || req.RetypePassword != "") && req.Phone != "" {
+		h.SendBadRequest(w, "invalid request.")
+		return
+	}
 
+	// Define code param
 	code := chi.URLParam(r, "code")
 	if len(code) == 0 {
 		h.SendBadRequest(w, "invalid code")
 		return
 	}
 
-	pass, err := bcrypt.GenerateFromPassword([]byte(req.Pass), 10)
-	if err != nil {
-		h.SendBadRequest(w, "Error when generate password")
-		return
-	}
-
+	// Check db context
 	ctx := context.Background()
 	db, err := h.DB.Acquire(ctx)
 	if err != nil {
@@ -244,13 +312,83 @@ func (h *Contract) UpdateMemberPass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer db.Release()
-
 	m := model.Contract{App: h.App}
-	err = m.UpdateMemberPass(db, ctx, code, string(pass))
+
+	// Response
+	response := map[string]interface{}{
+		"member_code": code,
+	}
+
+	// Handle request
+	if req.Password != "" { // Handle request password
+		if req.Password != req.RetypePassword {
+			h.SendBadRequest(w, "Password is not match")
+			return
+		}
+		err = m.UpdateMemberPass(db, ctx, code, req.Password)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			return
+		}
+	} else if req.Phone != "" { // Handle request phone
+		err = m.UpdatePhoneMember(db, ctx, req.Phone, code)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			return
+		}
+		response["member_phone"] = req.Phone
+	}
+
+	h.SendSuccess(w, response, nil)
+}
+
+// AddMemberPassHandlerAct is handler for handling update pass or phone member
+func (h *Contract) AddMemberPassHandlerAct(w http.ResponseWriter, r *http.Request) {
+	// Check each request
+	req := request.ForgotPassReq{}
+	if err := h.Bind(r, &req); err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	if err := h.Validator.Driver.Struct(req); err != nil {
+		h.SendRequestValidationError(w, err.(validator.ValidationErrors))
+		return
+	}
+
+	// Response
+	response := map[string]interface{}{
+		"member_code": h.GetUserCode(r.Context()),
+	}
+
+	// Check db context
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
 	}
+	defer db.Release()
+	m := model.Contract{App: h.App}
 
-	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+	// Handle request
+	via := m.Via(req.Username)
+	viaName := model.TokenViaEmail
+	if via == "" {
+		h.SendBadRequest(w, "email / phone requests is invalid.")
+		return
+	}
+	if via == model.TokenViaPhone {
+		viaName = model.TokenViaPhone
+	}
+	response["username"] = req.Username
+
+	// Verification token
+	token, err := m.SendToken(db, ctx, h.GetChannel(r), model.ActChangePass, viaName, req.Username, "")
+	if err != nil {
+		h.SendBadRequest(w, fmt.Sprintf("error send token %s: %s", viaName, err.Error()))
+		return
+	}
+	response["token"] = token
+
+	h.SendSuccess(w, response, nil)
 }

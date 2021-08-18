@@ -1,10 +1,10 @@
 package model
 
 import (
-	"Contruction-Project/lib/utils"
 	"context"
 	"encoding/json"
 	"fmt"
+	"panorama/lib/utils"
 	"time"
 
 	"github.com/georgysavva/scany/pgxscan"

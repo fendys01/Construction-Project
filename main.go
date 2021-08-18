@@ -1,12 +1,12 @@
 package main
 
 import (
-	"Contruction-Project/bootstrap"
-	"Contruction-Project/lib/utils"
-	"Contruction-Project/services/api"
 	"fmt"
 	"log"
 	"os"
+	"panorama/bootstrap"
+	"panorama/lib/utils"
+	"panorama/services/api"
 
 	"path/filepath"
 	"runtime"

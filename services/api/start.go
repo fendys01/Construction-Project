@@ -1,8 +1,6 @@
 package api
 
 import (
-	"Contruction-Project/bootstrap"
-	"Contruction-Project/lib/psql"
 	"context"
 	"fmt"
 	"log"
@@ -10,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"panorama/bootstrap"
+	"panorama/lib/psql"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -71,6 +71,12 @@ func (app Boot) Start(c *cli.Context) error {
 			"X-SIGNATURE",
 			"X-TIMESTAMPT",
 			"X-CHANNEL",
+			"Access-Control-Allow-Headers",
+			"X-Requested-With",
+			"application/json",
+			"Cache-Control",
+			"Token",
+			"X-Token",
 		},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
@@ -82,7 +88,7 @@ func (app Boot) Start(c *cli.Context) error {
 	}
 	r.Use(app.Recoverer)
 	r.Use(app.NotfoundMiddleware)
-	r.Use(app.HeaderCheckerMiddleware)
+	// r.Use(app.HeaderCheckerMiddleware)
 
 	RegisterRoutes(r, app.App)
 

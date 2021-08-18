@@ -1,10 +1,10 @@
 package bootstrap
 
 import (
-	"Contruction-Project/lib/utils"
 	"context"
 	"fmt"
 	"net/http"
+	"panorama/lib/utils"
 	"runtime/debug"
 
 	"github.com/dgrijalva/jwt-go"

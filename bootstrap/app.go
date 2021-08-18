@@ -3,8 +3,8 @@ package bootstrap
 import (
 	"fmt"
 
-	"Contruction-Project/lib/logger"
-	"Contruction-Project/lib/utils"
+	"panorama/lib/logger"
+	"panorama/lib/utils"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/locales/en"

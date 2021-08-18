@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"testing"
 	"text/template"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -555,4 +557,15 @@ func CheckValueExists(entries ...interface{}) bool {
 	}
 
 	return false
+}
+
+func LoadFixture(t *testing.T, n string) string {
+	fixtureDir := "./test-fixtures"
+	p := filepath.Join(fixtureDir, n)
+	b, err := ioutil.ReadFile(p)
+	if err != nil {
+		t.Fatalf("Error while trying to read %s: %v\n", n, err)
+	}
+
+	return string(b)
 }
