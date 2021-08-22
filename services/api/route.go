@@ -19,6 +19,7 @@ func RegisterRoutes(r *chi.Mux, app *bootstrap.App) {
 func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 	h := handler.Contract{App: app}
 
+	// auth
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/login", h.LoginAct)
 		r.Post("/register", h.RegisterAct)
