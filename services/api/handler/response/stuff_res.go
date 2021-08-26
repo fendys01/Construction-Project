@@ -70,5 +70,31 @@ func (r StuffListResponse) Transform(i model.StuffEnt) StuffListResponse {
 	r.CreatedDate = timeday
 
 	return r
+}
 
+type StuffDetailResponse struct {
+	Name 	   		string `json:"name"`
+	Image      		string  `json:"image"`
+	Description		string `json:"description"`
+	Price    		string `json:"price"`
+}
+
+// Transform from order model to itin order member response
+func (r StuffDetailResponse) Transform(i model.StuffEnt) StuffDetailResponse {
+
+	r.Name = i.Name
+	if len(i.Image.String) > 0 {
+		if IsUrl(i.Image.String) {
+			r.Image = i.Image.String
+		} else {
+			r.Image = viper.GetString("aws.s3.public_url") + i.Image.String
+		}
+
+	} else {
+		r.Image = ""
+	}
+	r.Description = i.Description
+	r.Price = i.Price
+
+	return r
 }

@@ -120,3 +120,14 @@ func (c *Contract) GetListStuff(db *pgxpool.Conn, ctx context.Context, param map
 
 	return list, err
 }
+
+func (c *Contract) GetStuffCode(db *pgxpool.Conn, ctx context.Context, code string) (StuffEnt, error) {
+	var s StuffEnt
+	sql := `select
+				code, name, image, description, price
+			from stuff
+			where code = $1 limit 1`
+	err := db.QueryRow(ctx, sql, code).Scan(&s.Code, &s.Name, &s.Image, &s.Description, &s.Price)
+
+	return s, err
+}

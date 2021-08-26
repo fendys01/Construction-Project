@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -136,5 +137,32 @@ func (h *Contract) GetListStuffAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.SendSuccess(w, listResponse, param)
+}
 
+func (h *Contract) GeDetailStuffAct(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	m := model.Contract{App: h.App}
+	code := chi.URLParam(r, "code")
+	if len(code) > 0 {
+		s, err := m.GetStuffCode(db, ctx, code)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			return
+		}
+
+		var res response.StuffDetailResponse
+		res = res.Transform(s)
+
+		h.SendSuccess(w, res, nil)
+		return
+	}
+
+	h.SendSuccess(w, h.EmptyJSONArr(), nil)
 }

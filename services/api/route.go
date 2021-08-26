@@ -114,6 +114,7 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 		r.Route("/stuff", func(r chi.Router) {
 			r.Post("/", h.AddStuffAct)
 			r.Get("/", h.GetListStuffAct)
+			r.Get("/{code}", h.GeDetailStuffAct)
 		})
 	})
 }
