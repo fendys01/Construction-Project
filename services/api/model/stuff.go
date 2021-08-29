@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/georgysavva/scany/pgxscan"
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -22,6 +24,7 @@ type StuffEnt struct {
 	Description      string
 	Price            string
 	Type             int32
+	IsActive         bool
 	CreatedDate      time.Time
 	UpdatedDate      time.Time
 	Deleted       	 time.Time
@@ -130,4 +133,24 @@ func (c *Contract) GetStuffCode(db *pgxpool.Conn, ctx context.Context, code stri
 	err := db.QueryRow(ctx, sql, code).Scan(&s.Code, &s.Name, &s.Image, &s.Description, &s.Price)
 
 	return s, err
+}
+
+func (c *Contract) GetStuffByCode(db *pgxpool.Conn, ctx context.Context, code string) (StuffEnt, error) {
+	var s StuffEnt
+
+	err := pgxscan.Get(ctx, db, &s, "select * from stuff where is_active = true and code=$1 limit 1", code)
+	return s, err
+}
+
+func (c *Contract) UpdateStuff(tx pgx.Tx, ctx context.Context, code string, s StuffEnt) error {
+
+	var ID int32
+
+	sql := `update stuff set name=$1, image=$2, description=$3, price=$4, type=$5, is_active=$6, updated_date=$7 where code=$8 RETURNING id`
+
+	err := tx.QueryRow(ctx, sql, s.Name, s.Image.String, s.Description, s.Price, s.Type, s.IsActive, time.Now().In(time.UTC), code).Scan(&ID)
+
+	s.ID = ID
+
+	return err
 }
