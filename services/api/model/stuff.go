@@ -26,8 +26,8 @@ type StuffEnt struct {
 	Type             int32
 	IsActive         bool
 	CreatedDate      time.Time
-	UpdatedDate      time.Time
-	Deleted       	 time.Time
+	UpdatedDate      sql.NullTime
+	DeletedDate      sql.NullTime
 }
 
 func (c *Contract) SetStuffCode() string {
@@ -153,4 +153,25 @@ func (c *Contract) UpdateStuff(tx pgx.Tx, ctx context.Context, code string, s St
 	s.ID = ID
 
 	return err
+}
+
+// Update IsActive Member.
+func (c *Contract) UpdateIsActive(tx pgx.Tx, ctx context.Context, code string, s StuffEnt) error {
+
+	var ID int32
+
+	sql := `update stuff set is_active=$1, deleted_date=$2 where code=$3 RETURNING id`
+
+	err := tx.QueryRow(ctx, sql, s.IsActive, time.Now().In(time.UTC), code).Scan(&ID)
+
+	s.ID = ID
+
+	return err
+}
+
+func (c *Contract) GetIsActiveStuff(db *pgxpool.Conn, ctx context.Context, code string) (StuffEnt, error) {
+	var s StuffEnt
+
+	err := pgxscan.Get(ctx, db, &s, "select * from stuff where is_active = true and code=$1 limit 1", code)
+	return s, err
 }

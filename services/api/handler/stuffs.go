@@ -218,3 +218,57 @@ func (h *Contract) UpdateDataStuffAct(w http.ResponseWriter, r *http.Request) {
 
 	h.SendSuccess(w, h.EmptyJSONArr(), nil)
 }
+
+// Deleted Stuff
+func (h *Contract) DeleteStuffAct(w http.ResponseWriter, r *http.Request) {
+	var err error
+	code := chi.URLParam(r, "code")
+	if len(code) == 0 {
+		h.SendBadRequest(w, "invalid code")
+		return
+	}
+	
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	m := model.Contract{App: h.App}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	data, err := m.GetIsActiveStuff(db, ctx, code)
+	if err == sql.ErrNoRows {
+		h.SendNotfound(w, err.Error())
+		return
+	}
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// edit status to false
+	data.IsActive = false
+	err = m.UpdateIsActive(tx, ctx, code, data)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Commit transaction
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+}
