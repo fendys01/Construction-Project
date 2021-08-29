@@ -169,12 +169,22 @@ func (h *Contract) GeDetailStuffAct(w http.ResponseWriter, r *http.Request) {
 
 func (h *Contract) UpdateDataStuffAct(w http.ResponseWriter, r *http.Request) {
 	var err error
+	req := request.StuffReqUpdate{}
+	if err = h.Bind(r, &req); err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	if err = h.Validator.Driver.Struct(req); err != nil {
+		h.SendRequestValidationError(w, err.(validator.ValidationErrors))
+		return
+	}
+
 	code := chi.URLParam(r, "code")
 	if len(code) == 0 {
 		h.SendBadRequest(w, "invalid code")
 		return
 	}
-	
+
 	ctx := context.Background()
 	db, err := h.DB.Acquire(ctx)
 	if err != nil {
@@ -200,23 +210,17 @@ func (h *Contract) UpdateDataStuffAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// edit data
-	err = m.UpdateStuff(tx, ctx, code, data)
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		tx.Rollback(ctx)
-		return
-	}
-
 	// Commit transaction
 	err = tx.Commit(ctx)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
-		tx.Rollback(ctx)
 		return
 	}
 
-	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+	var res response.StuffResponse
+	res = res.Transform(data)
+
+	h.SendSuccess(w, res, nil)
 }
 
 // Deleted Stuff
