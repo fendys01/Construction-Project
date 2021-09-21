@@ -99,11 +99,6 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 			r.Get("/", h.GetListNotifAct)
 		})
 
-		// add device
-		r.Route("/players", func(r chi.Router) {
-			r.Post("/", h.AddPlayersAct)
-		})
-
 		// Dashboard Admin
 		r.Route("/dashboard", func(r chi.Router) {
 			r.Get("/admin", h.GetDashboardAdminAct)
