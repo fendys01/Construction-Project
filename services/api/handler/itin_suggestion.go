@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"panorama/lib/array"
+	"panorama/lib/psql"
 	"panorama/services/api/handler/request"
 	"panorama/services/api/handler/response"
 	"panorama/services/api/model"
@@ -76,6 +77,12 @@ func (h *Contract) GetSugItinAct(w http.ResponseWriter, r *http.Request) {
 
 // AddSugItinAct add new suggestion itinerary
 func (h *Contract) AddSugItinAct(w http.ResponseWriter, r *http.Request) {
+	role := h.GetUserRole(r.Context())
+	if role != "admin" && role != "tc" {
+		h.SendUnAuthorizedData(w)
+		return
+	}
+
 	req := request.SugItinReq{}
 	if err := h.Bind(r, &req); err != nil {
 		h.SendBadRequest(w, err.Error())
@@ -104,17 +111,17 @@ func (h *Contract) AddSugItinAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Assign tc id
-	tcCode := h.GetUserCode(r.Context())
-	userTc, _ := m.GetUserByCode(db, ctx, tcCode)
-	if userTc.ID == 0 {
-		h.SendNotfound(w, fmt.Sprintf("User Admin %s not found.", tcCode))
+	adminCode := h.GetUserCode(r.Context())
+	userAdmin, _ := m.GetUserByCode(db, ctx, adminCode)
+	if userAdmin.ID == 0 {
+		h.SendNotfound(w, fmt.Sprintf("User Admin %s not found.", adminCode))
 		tx.Rollback(ctx)
 		return
 	}
 
 	// Create suggestion itin
 	sugItinReq, _ := req.ToSugItinEnt(true)
-	sugItin, err := m.AddSugItin(tx, ctx, sugItinReq, userTc.ID)
+	sugItin, err := m.AddSugItin(tx, ctx, sugItinReq, userAdmin.ID)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)
@@ -130,8 +137,8 @@ func (h *Contract) AddSugItinAct(w http.ResponseWriter, r *http.Request) {
 
 	// Activity user logging in process
 	log := model.LogActivityUserEnt{
-		UserID:    int64(userTc.ID),
-		Role:      userTc.Role,
+		UserID:    int64(userAdmin.ID),
+		Role:      userAdmin.Role,
 		Title:     sugItin.Title,
 		Activity:  "Add New Suggest Itin",
 		EventType: r.Method,
@@ -139,6 +146,43 @@ func (h *Contract) AddSugItinAct(w http.ResponseWriter, r *http.Request) {
 	_, err = m.AddLogActivity(tx, ctx, log)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To User (Admin, TC)
+	userPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentUser := model.NotificationContent{
+		AdminName:    userAdmin.Name,
+		SugItinTitle: sugItin.Title,
+		Subject:      model.NOTIF_SUBJ_SUGGITIN_NEW,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To Member (Customer)
+	memberPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "customer")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentMember := model.NotificationContent{
+		SugItinTitle: sugItin.Title,
+		Subject:      model.NOTIF_SUBJ_SUGGITIN_NEW,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, memberPlayers, notifContentMember)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
 		tx.Rollback(ctx)
 		return
 	}
@@ -158,6 +202,12 @@ func (h *Contract) AddSugItinAct(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Contract) UpdateSugItinAct(w http.ResponseWriter, r *http.Request) {
+	role := h.GetUserRole(r.Context())
+	if role != "admin" && role != "tc" {
+		h.SendUnAuthorizedData(w)
+		return
+	}
+
 	var err error
 
 	code := chi.URLParam(r, "code")
@@ -189,11 +239,11 @@ func (h *Contract) UpdateSugItinAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Assign tc id
-	tcCode := h.GetUserCode(r.Context())
-	userTc, _ := m.GetUserByCode(db, ctx, tcCode)
-	if userTc.ID == 0 {
-		h.SendNotfound(w, fmt.Sprintf("User Admin %s not found.", tcCode))
+	// Assign admin id
+	adminCode := h.GetUserCode(r.Context())
+	userAdmin, _ := m.GetUserByCode(db, ctx, adminCode)
+	if userAdmin.ID == 0 {
+		h.SendNotfound(w, fmt.Sprintf("User Admin %s not found.", adminCode))
 		tx.Rollback(ctx)
 		return
 	}
@@ -238,8 +288,8 @@ func (h *Contract) UpdateSugItinAct(w http.ResponseWriter, r *http.Request) {
 
 	// Activity user logging in process
 	log := model.LogActivityUserEnt{
-		UserID:    int64(userTc.ID),
-		Role:      userTc.Role,
+		UserID:    int64(userAdmin.ID),
+		Role:      userAdmin.Role,
 		Title:     sugItin.Title,
 		Activity:  fmt.Sprintf("Update Suggest Itin %s", code),
 		EventType: r.Method,
@@ -358,6 +408,7 @@ func processTags(db *pgxpool.Conn, ctx context.Context, m model.Contract, sugID 
 func (h *Contract) GetItinSugList(w http.ResponseWriter, r *http.Request) {
 
 	param := map[string]interface{}{
+		"nearby":     "",
 		"keyword":    "",
 		"page":       1,
 		"limit":      10,
@@ -365,6 +416,11 @@ func (h *Contract) GetItinSugList(w http.ResponseWriter, r *http.Request) {
 		"sort":       "desc",
 		"order":      "itin_suggestions.id",
 		"created_by": "false",
+		"user_code":  "",
+	}
+
+	if nearby, ok := r.URL.Query()["nearby"]; ok && len(nearby[0]) > 0 {
+		param["nearby"] = nearby[0]
 	}
 
 	if page, ok := r.URL.Query()["page"]; ok && len(page[0]) > 0 {
@@ -392,6 +448,10 @@ func (h *Contract) GetItinSugList(w http.ResponseWriter, r *http.Request) {
 		param["created_by"] = h.GetUserCode(r.Context())
 	} else {
 		param["created_by"] = ""
+	}
+
+	if code, ok := r.URL.Query()["user_code"]; ok && len(code[0]) > 0 {
+		param["user_code"] = code[0]
 	}
 
 	if limit, ok := r.URL.Query()["limit"]; ok {

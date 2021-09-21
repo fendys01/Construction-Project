@@ -17,7 +17,8 @@ type MemberResponse struct {
 	Img            string `json:"image"`
 	LastActiveDate string `json:"last_active_date"`
 	TotalVisited   int32  `json:"total_visited"`
-	Token          string `json:"Token"`
+	Token          string `json:"token"`
+	IsActive       bool   `json:"is_active"`
 }
 
 // Transform from member model to member response
@@ -45,6 +46,7 @@ func (r MemberResponse) Transform(m model.MemberEnt) MemberResponse {
 	r.Email = m.Email
 	r.Phone = m.Phone
 	r.LastActiveDate = date
+	r.IsActive = m.IsActive
 	r.TotalVisited = m.MemberStatistik.TotalVisited.Int32
 
 	return r
@@ -55,6 +57,7 @@ type MemberDetailResponse struct {
 	MemberCode           string               `json:"member_code"`
 	Name                 string               `json:"name"`
 	Img                  string               `json:"image"`
+	LastSeen             string               `json:"last_seen"`
 	DetailActivityMember DetailActivityMember `json:"summary_activity"`
 	RecentActivityUser   []RecentActivityUser `json:"log_activity"`
 }
@@ -72,6 +75,13 @@ func (r MemberDetailResponse) Transform(m model.MemberEnt) MemberDetailResponse 
 	} else {
 		r.Img = ""
 	}
+
+	var date string
+	if m.MemberStatistik.LastActiveDate.Valid {
+		date = prettytime.Format(m.MemberStatistik.LastActiveDate.Time)
+	}
+
+	r.LastSeen = date
 
 	r.MemberCode = m.MemberCode
 	r.Name = m.Name
@@ -91,20 +101,14 @@ func (r MemberDetailResponse) Transform(m model.MemberEnt) MemberDetailResponse 
 
 // DetailActivityMember ...
 type DetailActivityMember struct {
-	LastSeen           string `json:"last_seen"`
-	TotalVisited       int32  `json:"total_app_visited"`
-	TotalComplateTrips int32  `json:"total_complate_trips"`
-	TotalTc            int32  `json:"total_tc"`
+	TotalVisited       int32 `json:"total_app_visited"`
+	TotalComplateTrips int32 `json:"total_complate_trips"`
+	TotalTc            int32 `json:"total_tc"`
 }
 
 // DetailActivityMember ...
 func (r DetailActivityMember) Transform(m model.MemberEnt) DetailActivityMember {
-	var date string
-	if m.MemberStatistik.LastActiveDate.Valid {
-		date = prettytime.Format(m.MemberStatistik.LastActiveDate.Time)
-	}
 
-	r.LastSeen = date
 	r.TotalVisited = m.MemberStatistik.TotalVisited.Int32
 	r.TotalComplateTrips = m.MemberStatistik.TotalCompletedItinerary.Int32
 	r.TotalTc = m.MemberStatistik.TotalTc.Int32

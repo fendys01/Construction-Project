@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -23,20 +24,21 @@ const (
 )
 
 type OrderEnt struct {
-	ID           int32
-	MemberItinID int32
-	PaidBy       int32
-	OrderCode    string
-	OrderStatus  string
-	TotalPrice   int64
-	OrderType    string
-	TcID         int32
-	CreatedDate  time.Time
-	DayPeriod    int32
-	MemberItin   MemberItinEnt
-	UserEnt      UserEnt
-	MemberEnt    MemberEnt
-	OrderPayment OrderPaymentEnt
+	ID                     int32
+	MemberItinID           int32
+	PaidBy                 int32
+	OrderCode              string
+	OrderStatus            string
+	TotalPrice             int64
+	OrderType              string
+	TcID                   int32
+	CreatedDate            time.Time
+	DayPeriod              int32
+	MemberItin             MemberItinEnt
+	UserEnt                UserEnt
+	MemberEnt              MemberEnt
+	OrderPayment           OrderPaymentEnt
+	OrderStatusDescription string
 }
 
 func (c *Contract) SetOrderCode() string {
@@ -76,14 +78,35 @@ func (c *Contract) UpdateOrderByMemberItinID(tx pgx.Tx, ctx context.Context, o O
 // Get Order List by Member_Code
 func (c *Contract) GetOrderByCode(db *pgxpool.Conn, ctx context.Context, code string) (OrderEnt, error) {
 	var o OrderEnt
+	var paymentType, paymentStatus, paymentURL sql.NullString
+	var paymentAmount sql.NullInt64
+	var paymentExpiredDate sql.NullTime
 
-	sqlM := `
-	select mi.itin_code, m.member_code, u.name, m.name, mi.title, mi.details, order_code, order_status, order_type, paid_by, total_price, orders.created_date 
-			from orders
-			join member_itins mi on mi.id = orders.member_itin_id 
-			join users u on u.id = orders.tc_id 
-			join members m on m.id = orders.paid_by
-			where order_code = $1 limit 1`
+	sqlM := `select 
+		mi.itin_code, 
+		m.member_code, 
+		u.name, 
+		m.name, 
+		mi.title, 
+		mi.details, 
+		order_code, 
+		order_status, 
+		order_type, 
+		paid_by, 
+		total_price,
+		op.payment_type,
+		op.amount payment_amount,
+		op.payment_status,
+		op.expired_date,
+		op.payment_url,
+		op.payloads,
+		orders.created_date 
+	from orders
+	join member_itins mi on mi.id = orders.member_itin_id 
+	join users u on u.id = orders.tc_id 
+	join members m on m.id = orders.paid_by
+	left join order_payments op on op.order_id = orders.id
+	where order_code = $1 limit 1`
 
 	for _, v := range o.MemberItin.Details {
 		c, err := json.Marshal(v["visit_list"])
@@ -94,7 +117,13 @@ func (c *Contract) GetOrderByCode(db *pgxpool.Conn, ctx context.Context, code st
 	}
 
 	err := db.QueryRow(ctx, sqlM, code).Scan(&o.MemberItin.ItinCode, &o.MemberEnt.MemberCode, &o.UserEnt.Name, &o.MemberEnt.Name, &o.MemberItin.Title, &o.MemberItin.Details, &o.OrderCode, &o.OrderStatus,
-		&o.OrderType, &o.PaidBy, &o.TotalPrice, &o.CreatedDate)
+		&o.OrderType, &o.PaidBy, &o.TotalPrice, &paymentType, &paymentAmount, &paymentStatus, &paymentExpiredDate, &paymentURL, &o.OrderPayment.Payloads, &o.CreatedDate)
+
+	o.OrderPayment.PaymentType = paymentType.String
+	o.OrderPayment.Amount = paymentAmount.Int64
+	o.OrderPayment.PaymentStatus = paymentStatus.String
+	o.OrderPayment.ExpiredDate = paymentExpiredDate.Time
+	o.OrderPayment.PaymentURL = paymentURL.String
 
 	return o, err
 }
@@ -104,6 +133,31 @@ func (c *Contract) GetListItinOrderMember(db *pgxpool.Conn, ctx context.Context,
 	list := []OrderEnt{}
 	var where []string
 	var paramQuery []interface{}
+	var paymentType, paymentStatus, paymentURL sql.NullString
+	var expiredDate sql.NullTime
+	var paymentAmount sql.NullInt64
+
+	sql := `select 
+			mi.Title, 
+			m.name,
+			o.order_code, 
+			o.order_status,
+			o.order_type,
+			o.total_price,
+			o.created_date,
+			op.payment_type,
+			op.amount payment_amount,
+			op.payment_status,
+			op.expired_date,
+			op.payment_url,
+			op.payloads
+		from orders o
+		join member_itins mi on mi.id = o.member_itin_id and mi.created_by = o.paid_by 
+		join users u on u.id = o.tc_id 
+		join members m on m.id = o.paid_by
+		left join order_payments op on op.order_id = o.id`
+
+	var q string = sql
 
 	if len(param["member_code"].(string)) > 0 {
 		var orWhere []string
@@ -126,27 +180,8 @@ func (c *Contract) GetListItinOrderMember(db *pgxpool.Conn, ctx context.Context,
 		where = append(where, strings.Join(orWhere, " AND "))
 	}
 
-	sql := `select 
-			mi.Title, 
-			m.name,
-			o.order_code, 
-			o.order_status,
-			o.order_type,
-			o.total_price,
-			o.created_date,
-			op.expired_date, 
-			op.payment_type, 
-			op.payment_status
-		from orders o
-		join member_itins mi on mi.id = o.member_itin_id 
-		join users u on u.id = o.tc_id 
-		join members m on m.id = o.paid_by
-		join order_payments op on op.order_id = o.id`
-
-	var q string = sql
-
 	if len(where) > 0 {
-		q += " AND " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ")
 	}
 
 	{
@@ -184,10 +219,16 @@ func (c *Contract) GetListItinOrderMember(db *pgxpool.Conn, ctx context.Context,
 
 	for rows.Next() {
 		var o OrderEnt
-		err = rows.Scan(&o.MemberItin.Title, &o.MemberEnt.Name, &o.OrderCode, &o.OrderStatus, &o.OrderType, &o.TotalPrice, &o.CreatedDate, &o.OrderPayment.ExpiredDate, &o.OrderPayment.PaymentType, &o.OrderPayment.PaymentStatus)
+		err = rows.Scan(&o.MemberItin.Title, &o.MemberEnt.Name, &o.OrderCode, &o.OrderStatus, &o.OrderType, &o.TotalPrice, &o.CreatedDate, &paymentType, &paymentAmount, &paymentStatus, &expiredDate, &paymentURL, &o.OrderPayment.Payloads)
 		if err != nil {
 			return list, err
 		}
+
+		o.OrderPayment.PaymentType = paymentType.String
+		o.OrderPayment.Amount = paymentAmount.Int64
+		o.OrderPayment.PaymentStatus = paymentStatus.String
+		o.OrderPayment.ExpiredDate = expiredDate.Time
+		o.OrderPayment.PaymentURL = paymentURL.String
 
 		list = append(list, o)
 	}
@@ -210,12 +251,47 @@ func (c *Contract) GetOrderByMemberItinID(db *pgxpool.Conn, ctx context.Context,
 // GetOrderByOrderCode Get Order by Order Code
 func (c *Contract) GetOrderByOrderCode(db *pgxpool.Conn, ctx context.Context, code string) (OrderEnt, error) {
 	var o OrderEnt
+	var tcID, memberID sql.NullInt32
+	var itinCode, itinTitle, itinDestination, tcRole, tcCode, tcName, memberCode, memberName sql.NullString
 
-	sqlM := `SELECT id, member_itin_id, paid_by, order_code, order_status, total_price, tc_id, order_type, created_date 
-			FROM orders
-			WHERE order_code = $1`
+	sqlM := `select 
+		o.id, 
+		o.member_itin_id, 
+		o.paid_by, 
+		o.order_code, 
+		o.order_status, 
+		o.total_price, 
+		o.tc_id, 
+		o.order_type, 
+		o.created_date,
+		mi.itin_code,
+		mi.title,
+		mi.destination,
+		u.id tc_id,
+		u.role tc_role,
+		u.user_code tc_code,
+		u.name tc_name,
+		m.id member_name,
+		m.member_code,
+		m.name member_name
+	from orders o 
+	left join member_itins mi on mi.id = o.member_itin_id and mi.deleted_date is null
+	left join users u on u.id = o.tc_id and u.deleted_date is null
+	left join members m on m.id = o.paid_by and m.deleted_date is null
+	where o.order_code = $1`
 
-	err := db.QueryRow(ctx, sqlM, code).Scan(&o.ID, &o.MemberItinID, &o.PaidBy, &o.OrderCode, &o.OrderStatus, &o.TotalPrice, &o.TcID, &o.OrderType, &o.CreatedDate)
+	err := db.QueryRow(ctx, sqlM, code).Scan(&o.ID, &o.MemberItinID, &o.PaidBy, &o.OrderCode, &o.OrderStatus, &o.TotalPrice, &o.TcID, &o.OrderType, &o.CreatedDate, &itinCode, &itinTitle, &itinDestination, &tcID, &tcRole, &tcCode, &tcName, &memberID, &memberCode, &memberName)
+
+	o.MemberItin.ItinCode = itinCode.String
+	o.MemberItin.Title = itinTitle.String
+	o.MemberItin.Destination = itinDestination.String
+	o.UserEnt.ID = tcID.Int32
+	o.UserEnt.Role = tcRole.String
+	o.UserEnt.UserCode = tcCode.String
+	o.UserEnt.Name = tcName.String
+	o.MemberEnt.ID = memberID.Int32
+	o.MemberEnt.MemberCode = memberCode.String
+	o.MemberEnt.Name = memberName.String
 
 	return o, err
 }

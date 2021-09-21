@@ -10,19 +10,21 @@ import (
 
 // ItinmemberResponse ...
 type ItinMemberResponse struct {
-	ItinCode     string                   `json:"itin_code"`
-	MemberCode   string                   `json:"member_code"`
-	Name         string                   `json:"name"`
-	Destination  string                   `json:"destination"`
-	Title        string                   `json:"title"`
-	EstPrice     int64                    `json:"est_price"`
-	StartDate    time.Time                `json:"start_date"`
-	EndDate      time.Time                `json:"end_date"`
-	CreatedDate  time.Time                `json:"created_date"`
-	DayPeriod    string                   `json:"day_period"`
-	Img          string                   `json:"img"`
-	Details      []map[string]interface{} `json:"detail"`
-	GroupMembers []map[string]interface{} `json:"group_members"`
+	ItinCode      string                   `json:"itin_code"`
+	MemberCode    string                   `json:"member_code"`
+	OrderCode     string                   `json:"order_code"`
+	Name          string                   `json:"name"`
+	Destination   string                   `json:"destination"`
+	Title         string                   `json:"title"`
+	EstPrice      int64                    `json:"est_price"`
+	StartDate     time.Time                `json:"start_date"`
+	EndDate       time.Time                `json:"end_date"`
+	CreatedDate   time.Time                `json:"created_date"`
+	DayPeriod     string                   `json:"day_period"`
+	ChatGroupCode string                   `json:"chat_group_code"`
+	Img           string                   `json:"img"`
+	Details       []map[string]interface{} `json:"detail"`
+	GroupMembers  []map[string]interface{} `json:"group_members"`
 }
 
 // Transform from itin member model to itin member response
@@ -30,6 +32,7 @@ func (r ItinMemberResponse) Transform(i model.MemberItinEnt) ItinMemberResponse 
 
 	r.ItinCode = i.ItinCode
 	r.MemberCode = i.MemberEnt.MemberCode
+	r.OrderCode = i.OrderCode
 	r.Name = i.MemberEnt.Name
 	r.Title = i.Title
 	r.Destination = i.Destination
@@ -38,6 +41,7 @@ func (r ItinMemberResponse) Transform(i model.MemberItinEnt) ItinMemberResponse 
 	r.EstPrice = i.EstPrice.Int64
 	r.StartDate = i.StartDate
 	r.EndDate = i.EndDate
+	r.ChatGroupCode = i.ChatGroupCode
 	r.Details = i.Details
 	r.GroupMembers = i.GroupMembers
 
@@ -51,6 +55,21 @@ func (r ItinMemberResponse) Transform(i model.MemberItinEnt) ItinMemberResponse 
 	} else {
 		r.Img = ""
 	}
+
+	return r
+}
+
+// ItinMemberSimpleRes ...
+type ItinMemberSimpleRes struct {
+	ItinCode string `json:"itin_code"`
+	Title    string `json:"title"`
+}
+
+// Transform from itin member model to itin member response
+func (r ItinMemberSimpleRes) Transform(i model.MemberItinEnt) ItinMemberSimpleRes {
+
+	r.ItinCode = i.ItinCode
+	r.Title = i.Title
 
 	return r
 }

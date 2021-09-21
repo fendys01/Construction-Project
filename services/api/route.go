@@ -19,14 +19,14 @@ func RegisterRoutes(r *chi.Mux, app *bootstrap.App) {
 func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 	h := handler.Contract{App: app}
 
-	// auth
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/login", h.LoginAct)
 		r.Post("/register", h.RegisterAct)
-		r.Post("/register/phone-validation", h.RegisterPhoneValidateTokenAct)
 		r.Post("/forgotpass", h.ForgotPassAct)
-		r.Post("/change-pass", h.ForgotChagePassAct)
-		r.Post("/forgotpass/validate-token", h.ForgotPassTokenValidationAct)
+		r.Post("/change-pass", h.ForgotChangePassAct)
+		r.Post("/checktoken-forgotpass", h.AuthCheckTokenForgotPassAct)
+		r.Post("/checktoken-phone", h.AuthCheckTokenPhoneAct)
+		r.Post("/token/{type}", h.SendTokenAct)
 	})
 
 	r.Route("/order", func(r chi.Router) {
@@ -44,10 +44,14 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 		r.Post("/uploads", h.UploadAct)
 
 		r.Route("/chats", func(r chi.Router) {
+			r.Get("/", h.GetChatListAct)
 			r.Post("/", h.ChatAct)
 			r.Post("/room", h.CreateChatGroup)
-			r.Post("/invite-tc", h.InviteTcToGroupChat)
+			r.Put("/invite-tc", h.InviteTcToGroupChat)
 			r.Post("/message", h.ChatMessage)
+			r.Get("/{code}", h.GetHistoryChatByCode)
+			r.Put("/{code}/leave-seasion", h.LeaveSesonChatAct)
+			r.Put("/is-read", h.UpdateIsReadMessages)
 		})
 
 		r.Route("/sug-itin", func(r chi.Router) {
@@ -81,9 +85,11 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 			r.Get("/{code}", h.GetMember)
 			r.Get("/{code}/activity", h.GetMemberStatistik)
 			r.Post("/", h.AddMemberAct)
+			r.Post("/checktoken-pass", h.UpdateMemberPassTokenAct)
 			r.Put("/{code}", h.UpdateMember)
-			r.Put("/{code}/pass", h.UpdateMemberPassPhoneAct)
-			r.Post("/pass", h.AddMemberPassHandlerAct)
+			r.Put("/pass/{code}", h.UpdateMemberPassAct)
+			r.Put("/phone/{code}", h.UpdateMemberPhoneAct)
+			r.Delete("/{code}", h.DeleteMember)
 		})
 
 		r.Route("/orders", func(r chi.Router) {
@@ -95,23 +101,13 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 
 		// create push notification
 		r.Route("/notification", func(r chi.Router) {
-			r.Post("/", h.AddPushNotifAct)
 			r.Get("/", h.GetListNotifAct)
+			r.Get("/{code}", h.GetNotifAct)
+			r.Get("/counter", h.GetCounterNotifAct)
 		})
 
-		// Dashboard Admin
 		r.Route("/dashboard", func(r chi.Router) {
-			r.Get("/admin", h.GetDashboardAdminAct)
-			r.Get("/tc", h.GetDashboardTcAct)
-		})
-
-		// Stuff 
-		r.Route("/stuff", func(r chi.Router) {
-			r.Post("/", h.AddStuffAct)
-			r.Get("/", h.GetListStuffAct)
-			r.Get("/{code}", h.GeDetailStuffAct)
-			r.Put("/{code}", h.UpdateDataStuffAct)
-			r.Delete("/{code}", h.DeleteStuffAct)
+			r.Get("/", h.GetDashboardAct)
 		})
 	})
 }

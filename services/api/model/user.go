@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"math"
 	"math/rand"
 	"panorama/lib/utils"
@@ -60,40 +61,47 @@ func (c *Contract) GetUser(db *pgxpool.Conn, ctx context.Context, param map[stri
 
 	if len(param["keyword"].(string)) > 0 {
 		var orWhere []string
-		orWhere = append(orWhere, "u.name like '%"+param["keyword"].(string)+"%'")
+		orWhere = append(orWhere, "name like '%"+param["keyword"].(string)+"%'")
+		orWhere = append(orWhere, "role like '%"+param["keyword"].(string)+"%'")
+		orWhere = append(orWhere, "phone like '%"+param["keyword"].(string)+"%'")
+		orWhere = append(orWhere, "email like '%"+param["keyword"].(string)+"%'")
 
 		where = append(where, "("+strings.Join(orWhere, " OR ")+")")
 	}
 
 	sql := `
-			select 
-				l.role, u.user_code,
-				u.name, u.img, u.phone, u.email,
-				count(distinct(paid_by)) as total_client, 
-				l.last_active_date
-			from users as u
-			left join orders o on o.tc_id = u.id
-			join log_visit_app l on l.user_id = u.id
-			where is_active = true `
+		select role, user_code, name,img, phone, email, count(distinct(total_client)), MAX(last_active_date) 
+			from (
+				select 
+					u.id, l.role, u.user_code,
+					u.name, u.img, u.phone, u.email,
+					paid_by as total_client, 
+					l.last_active_date
+				from users as u
+				left join orders o on o.tc_id = u.id
+				join log_visit_app l on l.user_id = u.id
+				where is_active = true 
+				group by paid_by, u.id, l.id 
+			) a `
 
 	var q string = sql
 
 	if len(param["role"].(string)) > 0 {
 
 		var orWhere []string
-		orWhere = append(orWhere, " l.role = '"+param["role"].(string)+"'")
+		orWhere = append(orWhere, " role = '"+param["role"].(string)+"'")
 
 		where = append(where, strings.Join(orWhere, " AND "))
 
 	}
 
 	if len(where) > 0 {
-		q += " AND " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ")
 	}
 
 	{
 		var count int
-		newQcount := `SELECT COUNT(*) FROM ( ` + q + ` group by paid_by, u.id, l.id  ) AS data`
+		newQcount := `SELECT COUNT(*) FROM ( ` + q + ` group by id, role, name, img, phone, user_code, email ) AS data`
 
 		err := db.QueryRow(ctx, newQcount, paramQuery...).Scan(&count)
 		if err != nil {
@@ -110,9 +118,9 @@ func (c *Contract) GetUser(db *pgxpool.Conn, ctx context.Context, param map[stri
 	param["offset"] = (param["page"].(int) - 1) * param["limit"].(int)
 
 	if param["limit"].(int) == -1 {
-		q += " group by paid_by, u.id, l.id ORDER BY " + param["order"].(string) + " " + param["sort"].(string)
+		q += " group by id, role, name, img, phone, email, user_code ORDER BY " + param["order"].(string) + " " + param["sort"].(string)
 	} else {
-		q += " group by paid_by, u.id, l.id ORDER BY " + param["order"].(string) + " " + param["sort"].(string) + " offset $1 limit $2 "
+		q += " group by id, role, name, img, phone, email, user_code ORDER BY " + param["order"].(string) + " " + param["sort"].(string) + " offset $1 limit $2 "
 		paramQuery = append(paramQuery, param["offset"])
 		paramQuery = append(paramQuery, param["limit"])
 	}
@@ -149,7 +157,7 @@ func (c *Contract) GetDetailTcByCode(db *pgxpool.Conn, ctx context.Context, code
 	sql := `
 			select 
 				u.ID, u.user_code, l.role,
-				u.name, u.phone, u.img, 	
+				u.name, u.phone, u.img, u.phone,	
 				count(distinct(paid_by)) as total_client, 
 				count(o.id) as  total_ord,
 				count(case when o.order_type = 'C' then o.order_type end) as total_cust_ord,
@@ -163,7 +171,7 @@ func (c *Contract) GetDetailTcByCode(db *pgxpool.Conn, ctx context.Context, code
 			group by paid_by, u.id, l.id`
 
 	err := db.QueryRow(ctx, sql, code).Scan(
-		&u.ID, &u.UserCode, &u.Role, &u.Name, &u.Phone, &u.Img, &u.TotalClient,
+		&u.ID, &u.UserCode, &u.Role, &u.Name, &u.Phone, &u.Img, &u.Phone, &u.TotalClient,
 		&u.TotalOrd, &u.TotalCustomOrder, &u.LastVisit)
 
 	return u, err
@@ -174,7 +182,7 @@ func (c *Contract) GetDetailAdminByCode(db *pgxpool.Conn, ctx context.Context, c
 	var u UserEnt
 	sql := `
 		select 
-			u.id, u.user_code,u.email, u.name, u.img, SUM(view), count(itin.id) ,l.last_active_date
+			u.id, u.user_code,u.email, u.name, u.img, u.phone, SUM(view), count(itin.id) ,l.last_active_date
 		from users as u
 		left join itin_suggestions itin on itin.created_by = u.id
 		left join log_visit_app l on l.user_id = u.id
@@ -182,7 +190,7 @@ func (c *Contract) GetDetailAdminByCode(db *pgxpool.Conn, ctx context.Context, c
 		group by u.id, l.id order by l.id desc limit 1`
 
 	err := db.QueryRow(ctx, sql, code).Scan(
-		&u.ID, &u.UserCode, &u.Email, &u.Name, &u.Img, &u.TotalItinSugView,
+		&u.ID, &u.UserCode, &u.Email, &u.Name, &u.Img, &u.Phone, &u.TotalItinSugView,
 		&u.TotalItinSug, &u.LastVisit)
 
 	return u, err
@@ -245,16 +253,6 @@ func (c *Contract) UpdateUser(tx pgx.Tx, ctx context.Context, code string, u Use
 	return err
 }
 
-// UpdateUserPass ...
-func (c *Contract) UpdateUserPass(db *pgxpool.Conn, ctx context.Context, code, pass string) error {
-	_, err := db.Exec(context.Background(),
-		"update users set password=$1, updated_date=$2 where user_code=$3",
-		pass, time.Now().In(time.UTC), code,
-	)
-
-	return err
-}
-
 // UpdateEmail ...
 func (c *Contract) UpdateEmail(db *pgxpool.Conn, ctx context.Context, id int32, email string) error {
 	_, err := db.Exec(context.Background(),
@@ -269,4 +267,14 @@ func (c *Contract) UpdateEmail(db *pgxpool.Conn, ctx context.Context, id int32, 
 	// TODO: need to send email confirmation for change email
 
 	return nil
+}
+
+func (c *Contract) GetUserBy(db *pgxpool.Conn, ctx context.Context, field, username string) (UserEnt, error) {
+	var u UserEnt
+	err := pgxscan.Get(ctx, db, &u,
+		fmt.Sprintf("select * from users where %s=$1 limit 1", field),
+		username,
+	)
+
+	return u, err
 }

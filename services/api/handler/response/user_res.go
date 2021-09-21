@@ -58,6 +58,7 @@ type TcDetailResponse struct {
 	Email                 string                  `json:"email"`
 	Phone                 string                  `json:"phone"`
 	Img                   string                  `json:"image"`
+	LastSeen              string                  `json:"last_seen"`
 	SummaryActivityTc     SummaryActivityTc       `json:"summary_activity"`
 	RecentActivityUser    []RecentActivityUser    `json:"log_activity_user"`
 	ActiveClientConsultan []ActiveClientConsultan `json:"active_client_consultan"`
@@ -70,6 +71,7 @@ func (r TcDetailResponse) Transform(m model.UserEnt) TcDetailResponse {
 	r.Name = m.Name
 	r.Email = m.Email
 	r.Phone = m.Phone
+	r.LastSeen = prettytime.Format(m.LastVisit.Time)
 	r.SummaryActivityTc = r.SummaryActivityTc.Transform(m)
 
 	if len(m.Img.String) > 0 {
@@ -104,10 +106,9 @@ func (r TcDetailResponse) Transform(m model.UserEnt) TcDetailResponse {
 
 // SummaryActivityTc ...
 type SummaryActivityTc struct {
-	TotalClient         int32  `json:"total_client"`
-	TripBooked          int32  `json:"trip_booked"`
-	CustomPackageBooked int32  `json:"custom_package_booked"`
-	LastSeen            string `json:"last_seen"`
+	TotalClient         int32 `json:"total_client"`
+	TripBooked          int32 `json:"trip_booked"`
+	CustomPackageBooked int32 `json:"custom_package_booked"`
 }
 
 // SummaryActivityTc ...
@@ -116,7 +117,6 @@ func (r SummaryActivityTc) Transform(m model.UserEnt) SummaryActivityTc {
 	r.TotalClient = m.TotalClient.Int32
 	r.TripBooked = m.TotalOrd.Int32
 	r.CustomPackageBooked = m.TotalCustomOrder.Int32
-	r.LastSeen = prettytime.Format(m.LastVisit.Time)
 
 	return r
 }
@@ -127,6 +127,8 @@ type AdminDetailResponse struct {
 	Name                 string               `json:"name"`
 	Email                string               `json:"email"`
 	Img                  string               `json:"image"`
+	Phone                string               `json:"phone"`
+	LastSeen             string               `json:"last_seen"`
 	SummaryActivityAdmin SummaryActivityAdmin `json:"summary_activity"`
 	RecentActivityUser   []RecentActivityUser `json:"log_activity_user"`
 }
@@ -137,6 +139,8 @@ func (r AdminDetailResponse) Transform(m model.UserEnt) AdminDetailResponse {
 	r.UserCode = m.UserCode
 	r.Name = m.Name
 	r.Email = m.Email
+	r.Phone = m.Phone
+	r.LastSeen = prettytime.Format(m.LastVisit.Time)
 	r.SummaryActivityAdmin = r.SummaryActivityAdmin.Transform(m)
 
 	if len(m.Img.String) > 0 {
@@ -164,9 +168,8 @@ func (r AdminDetailResponse) Transform(m model.UserEnt) AdminDetailResponse {
 
 // SummaryActivityAdmin ...
 type SummaryActivityAdmin struct {
-	TotalItinSugView int32  `json:"total_itin_view"`
-	TotalItinCreated int32  `json:"total_itin_created"`
-	LastSeen         string `json:"last_seen"`
+	TotalItinSugView int32 `json:"total_itin_view"`
+	TotalItinCreated int32 `json:"total_itin_created"`
 }
 
 // Transform from member model to member response
@@ -174,7 +177,6 @@ func (r SummaryActivityAdmin) Transform(m model.UserEnt) SummaryActivityAdmin {
 
 	r.TotalItinSugView = m.TotalItinSugView.Int32
 	r.TotalItinCreated = m.TotalItinSug.Int32
-	r.LastSeen = prettytime.Format(m.LastVisit.Time)
 
 	return r
 }

@@ -2,6 +2,7 @@ package response
 
 import (
 	"panorama/services/api/model"
+	"reflect"
 	"strconv"
 	"time"
 )
@@ -9,18 +10,26 @@ import (
 // ItinOrderMember Response Detail
 
 type DetailOrderMemberResponse struct {
-	MemberItinCode string                   `json:"itin_code"`
-	MemberCode     string                   `json:"member_code"`
-	TcName         string                   `json:"tc_name"`
-	MemberName     string                   `json:"member_name"`
-	OrderCode      string                   `json:"order_code"`
-	Title          string                   `json:"title"`
-	Details        []map[string]interface{} `json:"detail"`
-	DayPeriod      string                   `json:"day_period"`
-	PaidBy         int32                    `json:"paid_by"`
-	TotalPrice     int64                    `json:"total_price"`
-	CreatedDate    time.Time                `json:"created_date"`
-	OrderType      string                   `json:"order_type"`
+	MemberItinCode         string                   `json:"itin_code"`
+	MemberCode             string                   `json:"member_code"`
+	TcName                 string                   `json:"tc_name"`
+	MemberName             string                   `json:"member_name"`
+	OrderCode              string                   `json:"order_code"`
+	Title                  string                   `json:"title"`
+	DayPeriod              string                   `json:"day_period"`
+	PaidBy                 int32                    `json:"paid_by"`
+	TotalPrice             int64                    `json:"total_price"`
+	CreatedDate            time.Time                `json:"created_date"`
+	OrderType              string                   `json:"order_type"`
+	PaymentType            string                   `json:"payment_type"`
+	PaymentAmount          int64                    `json:"payment_amount"`
+	PaymentStatus          string                   `json:"payment_status"`
+	PaymentExpiredDate     time.Time                `json:"payment_expired_date"`
+	PaymentExpiredDateText string                   `json:"payment_expired_date_text"`
+	PaymentURL             string                   `json:"payment_url"`
+	PaymentPayloads        map[string]interface{}   `json:"payment_payloads"`
+	Details                []map[string]interface{} `json:"detail"`
+	DetailsOrders          []map[string]interface{} `json:"detail_orders"`
 }
 
 // Transform from order model to detail order member response
@@ -31,12 +40,56 @@ func (r DetailOrderMemberResponse) Transform(i model.OrderEnt) DetailOrderMember
 	r.MemberName = i.MemberEnt.Name
 	r.OrderCode = i.OrderCode
 	r.Title = i.MemberItin.Title
-	r.Details = i.MemberItin.Details
 	r.DayPeriod = strconv.Itoa(int(i.DayPeriod)) + "D" + strconv.Itoa(int(i.DayPeriod-1)) + "N"
 	r.PaidBy = i.PaidBy
 	r.TotalPrice = i.TotalPrice
 	r.CreatedDate = i.CreatedDate
 	r.OrderType = i.OrderType
+	r.PaymentType = i.OrderPayment.PaymentType
+	r.PaymentAmount = i.OrderPayment.Amount
+	r.PaymentStatus = i.OrderPayment.PaymentStatus
+	r.PaymentURL = i.OrderPayment.PaymentURL
+	r.PaymentPayloads = i.OrderPayment.Payloads
+	r.Details = i.MemberItin.Details
+	r.PaymentExpiredDate = i.OrderPayment.ExpiredDate
+	expiredDateText := i.OrderPayment.ExpiredDate.String()
+	if i.OrderPayment.ExpiredDate.IsZero() {
+		expiredDateText = ""
+	}
+	r.PaymentExpiredDateText = expiredDateText
+
+	for _, v := range i.MemberItin.Details {
+
+		if reflect.ValueOf(v["flight"]).IsValid() {
+			if len(r.DetailsOrders) <= 0 {
+				r.DetailsOrders = append(r.DetailsOrders, v)
+			} else {
+				r.DetailsOrders[0]["flight"] = v
+			}
+
+		} else if reflect.ValueOf(v["hotel"]).IsValid() {
+			if len(r.DetailsOrders) <= 0 {
+				r.DetailsOrders = append(r.DetailsOrders, v)
+			} else {
+				r.DetailsOrders[0]["hotel"] = v["hotel"]
+			}
+
+		} else if reflect.ValueOf(v["other"]).IsValid() {
+			if len(r.DetailsOrders) <= 0 {
+				r.DetailsOrders = append(r.DetailsOrders, v)
+			} else {
+				r.DetailsOrders[0]["other"] = v["other"]
+			}
+
+		} else if reflect.ValueOf(v["others"]).IsValid() {
+			if len(r.DetailsOrders) <= 0 {
+				r.DetailsOrders = append(r.DetailsOrders, v)
+			} else {
+				r.DetailsOrders[0]["others"] = v["others"]
+			}
+
+		}
+	}
 
 	return r
 
@@ -44,15 +97,20 @@ func (r DetailOrderMemberResponse) Transform(i model.OrderEnt) DetailOrderMember
 
 // ItinOrderMember Response List
 type ItinOrderMemberResponse struct {
-	Title         string    `json:"title"`
-	MemberName     string   `json:"customer_name"`
-	OrderCode     string    `json:"order_code"`
-	PaymentStatus string    `json:"payment_status"`
-	PaymentType   string    `json:"payment_type"`
-	OrderStatus   string    `json:"order_status"`
-	OrderType     string    `json:"order_type"`
-	TotalPrice    int64     `json:"total_price"`
-	CreatedDate   string `json:"created_date"`
+	Title                  string                 `json:"title"`
+	MemberName             string                 `json:"customer_name"`
+	OrderCode              string                 `json:"order_code"`
+	OrderStatus            string                 `json:"order_status"`
+	OrderType              string                 `json:"order_type"`
+	TotalPrice             int64                  `json:"total_price"`
+	CreatedDate            string                 `json:"created_date"`
+	PaymentType            string                 `json:"payment_type"`
+	PaymentAmount          int64                  `json:"payment_amount"`
+	PaymentStatus          string                 `json:"payment_status"`
+	PaymentExpiredDate     time.Time              `json:"payment_expired_date"`
+	PaymentExpiredDateText string                 `json:"payment_expired_date_text"`
+	PaymentURL             string                 `json:"payment_url"`
+	PaymentPayloads        map[string]interface{} `json:"payment_payloads"`
 }
 
 // Transform from order model to itin order member response
@@ -60,16 +118,24 @@ func (r ItinOrderMemberResponse) Transform(i model.OrderEnt) ItinOrderMemberResp
 	time := i.CreatedDate
 	timeday := time.Format("January 02, 2006")
 
-
 	r.Title = i.MemberItin.Title
 	r.MemberName = i.MemberEnt.Name
 	r.OrderCode = i.OrderCode
-	r.PaymentStatus = i.OrderPayment.PaymentStatus
-	r.PaymentType = i.OrderPayment.PaymentType
 	r.CreatedDate = timeday
 	r.OrderStatus = i.OrderStatus
 	r.OrderType = i.OrderType
 	r.TotalPrice = i.TotalPrice
+	r.PaymentType = i.OrderPayment.PaymentType
+	r.PaymentAmount = i.OrderPayment.Amount
+	r.PaymentStatus = i.OrderPayment.PaymentStatus
+	r.PaymentURL = i.OrderPayment.PaymentURL
+	r.PaymentPayloads = i.OrderPayment.Payloads
+	r.PaymentExpiredDate = i.OrderPayment.ExpiredDate
+	expiredDateText := i.OrderPayment.ExpiredDate.String()
+	if i.OrderPayment.ExpiredDate.IsZero() {
+		expiredDateText = ""
+	}
+	r.PaymentExpiredDateText = expiredDateText
 
 	return r
 

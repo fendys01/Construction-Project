@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -34,20 +35,25 @@ func (c *Contract) GetTcIDLeastWorkByID(db *pgxpool.Conn, ctx context.Context, i
 	return idTc, err
 }
 
-func (c *Contract) GetTcIDLeastWork(db *pgxpool.Conn, ctx context.Context) (int32, error) {
+func (c *Contract) GetTcIDLeastWork(db *pgxpool.Conn, ctx context.Context) (int32, string, error) {
 	var idTc, totalItin int32
+	var name string
+
+	startDate := fmt.Sprintf("%v", time.Now().Format("2006-01-02")) + " 00:00:00"
+	endDate := fmt.Sprintf("%v", time.Now().Format("2006-01-02")) + " 23:59:59"
 
 	err := db.QueryRow(ctx, `
 			select 
-				u.id, count(o.member_itin_id) a
+				u.id, count(o.member_itin_id) a, u.name
 			from users as u
 			left join orders o on o.tc_id = u.id
 			join log_visit_app l on l.user_id = u.id
-			where is_active = true and u.role = 'tc'
-			group by paid_by, u.id
-			order by a asc limit 1`).Scan(&idTc, &totalItin)
+			where is_active = true and u.role = 'tc' and l.role = 'tc' 
+			and l.last_active_date between $1 AND $2
+			group by paid_by, u.id 
+			order by a asc limit 1`, startDate, endDate).Scan(&idTc, &totalItin, &name)
 
-	return idTc, err
+	return idTc, name, err
 }
 
 // ChangeTc ...

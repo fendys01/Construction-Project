@@ -3,6 +3,8 @@ package model
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
@@ -17,11 +19,19 @@ func (c *Contract) GetDailyVisitsAct(db *pgxpool.Conn, ctx context.Context, para
 	list := []DailyVisitsEnt{}
 	var paramQuery []interface{}
 
-	sql := `select
-				last_active_date, SUM(total_visited) as total_visits
-			FROM log_visit_app	
-			where role = 'customer'
-			group by last_active_date`
+	sql := `select last_active_date, SUM(total_visited) as total_visits FROM log_visit_app	
+	where role = 'customer' and last_active_date between $1 and $2 group by last_active_date order by last_active_date asc`
+
+	startDate := fmt.Sprintf("%v", time.Now().Format("2006-01-02")) + " 00:00:00"
+	endDate := fmt.Sprintf("%v", time.Now().Format("2006-01-02")) + " 23:59:59"
+
+	if len(param["start_date"].(string)) > 0 && len(param["end_date"].(string)) > 0 {
+		startDate = fmt.Sprintf("%v %s", param["start_date"], "00:00:00")
+		endDate = fmt.Sprintf("%v %s", param["end_date"], "23:59:59")
+	}
+
+	paramQuery = append(paramQuery, startDate)
+	paramQuery = append(paramQuery, endDate)
 
 	rows, err := db.Query(ctx, sql, paramQuery...)
 	if err != nil {

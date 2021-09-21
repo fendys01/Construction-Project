@@ -1,0 +1,1 @@
+ALTER TABLE chat_member_temporaries ADD CONSTRAINT chat_member_temp_unique UNIQUE (email,chat_group_id);

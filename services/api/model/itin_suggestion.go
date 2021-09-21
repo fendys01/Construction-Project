@@ -110,8 +110,14 @@ func (c *Contract) GetListItinSug(db *pgxpool.Conn, ctx context.Context, param m
 
 	if len(param["keyword"].(string)) > 0 {
 		var orWhere []string
-		orWhere = append(orWhere, "name like ?")
-		paramQuery = append(paramQuery, "%"+param["keyword"].(string)+"%")
+		orWhere = append(orWhere, "lower(name) like lower('%"+param["keyword"].(string)+"%')")
+
+		where = append(where, "("+strings.Join(orWhere, " OR ")+")")
+	}
+
+	if len(param["nearby"].(string)) > 0 {
+		var orWhere []string
+		orWhere = append(orWhere, "lower(destination) like lower('%"+param["nearby"].(string)+"%')")
 
 		where = append(where, "("+strings.Join(orWhere, " OR ")+")")
 	}
@@ -126,6 +132,14 @@ func (c *Contract) GetListItinSug(db *pgxpool.Conn, ctx context.Context, param m
 
 		var orWhere []string
 		orWhere = append(orWhere, " user_code = '"+param["created_by"].(string)+"'")
+		where = append(where, "("+strings.Join(orWhere, " AND ")+")")
+
+	}
+
+	if len(param["user_code"].(string)) > 0 {
+
+		var orWhere []string
+		orWhere = append(orWhere, " user_code = '"+param["user_code"].(string)+"'")
 		where = append(where, "("+strings.Join(orWhere, " AND ")+")")
 
 	}
@@ -158,7 +172,6 @@ func (c *Contract) GetListItinSug(db *pgxpool.Conn, ctx context.Context, param m
 		paramQuery = append(paramQuery, param["offset"])
 		paramQuery = append(paramQuery, param["limit"])
 	}
-
 	rows, err := db.Query(ctx, q, paramQuery...)
 	if err != nil {
 		return list, err

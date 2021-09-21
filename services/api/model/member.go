@@ -31,6 +31,7 @@ type MemberEnt struct {
 	IsActive        bool `db:"is_active"`
 	CreatedDate     time.Time
 	UpdatedDate     time.Time
+	DeletedDate     sql.NullTime
 	LogActivityUser []LogActivityUserEnt
 	MemberStatistik MemberStatistikEnt
 }
@@ -43,6 +44,27 @@ type MemberStatistikEnt struct {
 	TotalCompletedItinerary sql.NullInt32
 }
 
+func (c *Contract) GetMemberDelByCode(db *pgxpool.Conn, ctx context.Context, code string) (MemberEnt, error) {
+	var u MemberEnt
+
+	err := pgxscan.Get(ctx, db, &u, "select * from members where is_active = true and member_code=$1 limit 1", code)
+	return u, err
+}
+
+// Update IsActive Member.
+func (c *Contract) UpdateIsActive(tx pgx.Tx, ctx context.Context, code string, u MemberEnt) error {
+
+	var ID int32
+
+	sql := `update members set is_active=$1, deleted_date=$2 where member_code=$3 RETURNING id`
+
+	err := tx.QueryRow(ctx, sql, u.IsActive, time.Now().In(time.UTC), code).Scan(&ID)
+
+	u.ID = ID
+
+	return err
+}
+
 func (c *Contract) createMemberCode() string {
 	rand.Seed(time.Now().UnixNano())
 	code, _ := utils.Generate(`[a-z0-9]{6}`)
@@ -50,9 +72,9 @@ func (c *Contract) createMemberCode() string {
 }
 
 // ActivateAndSetPhoneValid ...
-func (c *Contract) ActivateAndSetPhoneValid(db *pgxpool.Conn, ctx context.Context, phone string) error {
+func (c *Contract) ActivateAndSetPhoneValid(tx pgx.Tx, ctx context.Context, phone string) error {
 	sql := `update members set is_active=$1, is_valid_phone=$2, updated_date=$3 where phone=$4;`
-	_, err := db.Exec(ctx, sql, true, true, time.Now().In(time.UTC), phone)
+	_, err := tx.Exec(ctx, sql, true, true, time.Now().In(time.UTC), phone)
 
 	return err
 }
@@ -162,19 +184,6 @@ func (c *Contract) isMemberExists(db *pgxpool.Conn, ctx context.Context, field, 
 	return true
 }
 
-// UpdateMemberPass ...
-func (c *Contract) UpdateMemberPass(db *pgxpool.Conn, ctx context.Context, username, newPass string) error {
-	pass, err := bcrypt.GenerateFromPassword([]byte(newPass), 10)
-	if err != nil {
-		return err
-	}
-
-	sql := fmt.Sprintf("update members set password=$1, updated_date=$2 where %s=$3", c.getMemberField(username))
-	_, err = db.Exec(context.Background(), sql, string(pass), time.Now().In(time.UTC), username)
-
-	return err
-}
-
 // GetListMember ...
 func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param map[string]interface{}) ([]MemberEnt, error) {
 
@@ -195,21 +204,27 @@ func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param ma
 		where = append(where, "("+strings.Join(orWhere, " OR ")+")")
 	}
 
-	sql := `SELECT members.id, member_code, name, username, email, phone, img, is_valid_email, 
+	sql := `
+		select id, member_code, name, username, email, phone, img, is_valid_email, 
+			   is_valid_phone, is_active, MAX(last_active_date), SUM(total_visited) 
+		from (
+			SELECT members.id, member_code, name, username, email, phone, img, is_valid_email, 
 			is_valid_phone, is_active, l.last_active_date, total_visited
 			from members
 			LEFT JOIN log_visit_app l on l.user_id = members.id
-			where l.role = 'customer' and is_active = true `
+			where l.role = 'customer' and is_active = true  
+			group by members.id, l.id
+		) a `
 
 	var q string = sql
 
 	if len(where) > 0 {
-		q += " AND " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ")
 	}
 
 	{
 		var count int
-		newQcount := `SELECT COUNT(*) FROM (` + q + `) AS data`
+		newQcount := `SELECT COUNT(*) FROM (` + q + ` group by id, member_code, name, username, email, phone, img, is_valid_email,is_valid_phone, is_active ) AS data`
 		err := db.QueryRow(ctx, newQcount, paramQuery...).Scan(&count)
 		if err != nil {
 			return list, err
@@ -225,14 +240,13 @@ func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param ma
 	param["offset"] = (param["page"].(int) - 1) * param["limit"].(int)
 
 	if param["limit"].(int) == -1 {
-		q += " ORDER BY " + param["order"].(string) + " " + param["sort"].(string)
+		q += " group by id, member_code, name, username, email, phone, img, is_valid_email,is_valid_phone, is_active ORDER BY " + param["order"].(string) + " " + param["sort"].(string)
 	} else {
-		q += " ORDER BY " + param["order"].(string) + " " + param["sort"].(string) + " offset $1 limit $2 "
+		q += " group by id, member_code, name, username, email, phone, img, is_valid_email,is_valid_phone, is_active ORDER BY " + param["order"].(string) + " " + param["sort"].(string) + " offset $1 limit $2 "
 		paramQuery = append(paramQuery, param["offset"])
 		paramQuery = append(paramQuery, param["limit"])
 	}
 
-	fmt.Println(q, paramQuery)
 	rows, err := db.Query(ctx, q, paramQuery...)
 	if err != nil {
 		return list, err
@@ -254,7 +268,7 @@ func (c *Contract) GetListMember(db *pgxpool.Conn, ctx context.Context, param ma
 }
 
 // UpdateMember ...
-func (c *Contract) UpdateMember(db *pgxpool.Conn, code string, m MemberEnt) (MemberEnt, error) {
+func (c *Contract) UpdateMember(tx pgx.Tx, code string, m MemberEnt) (MemberEnt, error) {
 
 	sql := `UPDATE members 
 			SET 
@@ -265,7 +279,7 @@ func (c *Contract) UpdateMember(db *pgxpool.Conn, code string, m MemberEnt) (Mem
 			img = $5,
 			updated_date = $6
 			WHERE member_code = $7;`
-	_, err := db.Exec(context.Background(), sql, m.Name, m.Username, m.Email, m.Phone, m.Img.String, time.Now().In(time.UTC), code)
+	_, err := tx.Exec(context.Background(), sql, m.Name, m.Username, m.Email, m.Phone, m.Img.String, time.Now().In(time.UTC), code)
 	if err != nil {
 		return m, err
 	}
@@ -301,11 +315,11 @@ func (c *Contract) UpdateTotalVisited(db *pgxpool.Conn, ctx context.Context, id 
 }
 
 // UpdatePhoneMember ...
-func (c *Contract) UpdatePhoneMember(db *pgxpool.Conn, ctx context.Context, phone string, code string) error {
+func (c *Contract) UpdatePhoneMember(tx pgx.Tx, ctx context.Context, phone string, code string) (string, error) {
 	sql := `UPDATE members SET phone = $1, is_active = $2, is_valid_phone = $3, updated_date = $4 WHERE member_code = $5;`
-	_, err := db.Exec(ctx, sql, phone, true, true, time.Now().In(time.UTC), code)
+	_, err := tx.Exec(ctx, sql, phone, true, true, time.Now().In(time.UTC), code)
 
-	return err
+	return phone, err
 }
 
 // add log visit app

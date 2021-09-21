@@ -8,12 +8,13 @@ import (
 	"math/rand"
 	"panorama/bootstrap"
 	"panorama/lib/citcall"
+	"panorama/lib/sendgrid"
 	"panorama/lib/utils"
 	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
-	"github.com/georgysavva/scany/pgxscan"
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	mail "github.com/xhit/go-simple-mail/v2"
 	"golang.org/x/crypto/bcrypt"
@@ -32,6 +33,7 @@ const (
 	TokenViaPhone = "phone"
 
 	tokenExpiredMin = 2 // in minutes
+	urlCms          = "https://dev-panorama-cms.rebelworks.co"
 )
 
 var tokenMailSubj = map[string]string{
@@ -39,6 +41,11 @@ var tokenMailSubj = map[string]string{
 	ActRegEmail:    "[Panorama] Email Verification",
 	ActChangeEmail: "[Panorama] Change Email Verification",
 	ActChangePass:  "[Panorama] Change Password Verification",
+}
+
+var urlCMSLink = map[string]string{
+	ActForgotPass: "forgotpassword",
+	ActRegEmail:   "verify",
 }
 
 var errInvalidCred error = fmt.Errorf("%s", "invalid user credential")
@@ -52,8 +59,11 @@ type DataEmailInviteItinMember struct {
 }
 
 type DataEmailToken struct {
-	Token       string
-	ExpiredTime int
+	TokenURL     string
+	ExpiredTime  int
+	Description  string
+	IsChannelApp bool
+	Title        string
 }
 
 func (c *Contract) generateJWT(ch, userID, role, key string) (string, int64, error) {
@@ -73,14 +83,20 @@ func (c *Contract) generateJWT(ch, userID, role, key string) (string, int64, err
 	return token, expirationTime, err
 }
 
-func (c *Contract) getMemberField(username string) string {
+func (c *Contract) getMemberField(username string, isMember bool) string {
 	var field string = "phone"
-	if utils.IsEmail(username) {
+	_, _, validPhone := utils.IsPhone(username)
+
+	if validPhone {
+		field = "phone"
+	} else if utils.IsEmail(username) {
 		field = "email"
-	} else if utils.IsUsernameTag(username) {
+	} else if utils.IsUsernameTag(username) && isMember {
 		field = "username"
-	} else if utils.IsCodeTag(username) {
+	} else if utils.IsCodeTag(username) && isMember {
 		field = "member_code"
+	} else if utils.IsCodeTag(username) && !isMember {
+		field = "user_code"
 	}
 
 	return field
@@ -171,40 +187,57 @@ func (c *Contract) sendDataMail(usedFor, subject, to string, dataMail interface{
 }
 
 // SendToken sending token for multiple action, type and channel
-func (c *Contract) SendToken(db *pgxpool.Conn, ctx context.Context, ch, usedFor, via, username, tokenParam string) (string, error) {
+func (c *Contract) SendToken(db *pgxpool.Conn, ctx context.Context, ch, usedFor, via, username, role, tokenParam string) (string, error) {
 	if !c.isValidTokenAction(ch, via, username) {
 		return "", fmt.Errorf("%s", "send token invalid action")
 	}
 
-	// TODO: need to implement this into specific logic
-	// if !c.isUsernameExists(db, ctx, ch, username) {
-	// 	return "", fmt.Errorf("username doesn't exists")
-	// }
-
-	token, err := c.addNewToken(db, ctx, ch, usedFor, via, username, tokenParam)
-	if err != nil {
-		return "", err
+	if !c.isUsernameExists(db, ctx, ch, username) {
+		return "", fmt.Errorf("user doesn't exists")
 	}
 
-	// fmt.Printf("\nchannel: %s\nused for: %s\nvia: %s\nuser: %s\ntoken: %s\n", ch, usedFor, via, username, token)
-
+	var token string
 	dataMail := DataEmailToken{
-		Token:       token,
 		ExpiredTime: tokenExpiredMin,
 	}
 
 	switch ch {
 	case ChannelCustApp:
+		newToken, err := c.addNewToken(db, ctx, ch, usedFor, via, username, tokenParam)
+		if err != nil {
+			return "", err
+		}
+
+		token = newToken
+		dataMail.Title = "OTP"
+		dataMail.TokenURL = token
+		dataMail.IsChannelApp = true
+		dataMail.Description = "Please input the 4 digit code"
+
 		if via == TokenViaEmail {
 			go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
 		}
 
 		if via == TokenViaPhone {
-			// send SMS with token
-			go citcall.New(c.App).SendOTP(username, token, tokenExpiredMin)
+			// Send SMS with token
+			sms, err := citcall.New(c.App).SendOTP(username, token, tokenExpiredMin)
+			if err != nil {
+				return "", err
+			}
+			if sms.RC != citcall.STATUS_OK {
+				return "", fmt.Errorf("citcall response = code: %d, description: %s", sms.RC, sms.Info)
+			}
 		}
 
 	case ChannelCMS:
+		tokenJWT, _, _ := c.generateJWT(ch, username, role, c.Config.GetString("app.key"))
+		token = tokenJWT
+
+		dataMail.Title = "Link"
+		dataMail.IsChannelApp = false
+		dataMail.TokenURL = fmt.Sprintf("%s/%s?token=%s", urlCms, urlCMSLink[usedFor], tokenJWT)
+		dataMail.Description = "Please click the link"
+
 		if via == TokenViaEmail {
 			go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
 		}
@@ -216,7 +249,7 @@ func (c *Contract) SendToken(db *pgxpool.Conn, ctx context.Context, ch, usedFor,
 func (c *Contract) isUsernameExists(db *pgxpool.Conn, ctx context.Context, ch, username string) bool {
 	switch ch {
 	case ChannelCustApp:
-		return c.isMemberExists(db, ctx, c.getMemberField(username), username)
+		return c.isMemberExists(db, ctx, c.getMemberField(username, true), username)
 
 	case ChannelCMS:
 		return c.isUserExists(db, ctx, username)
@@ -261,11 +294,9 @@ type tokenLogEnt struct {
 // getLatestToken get latest token of user
 func (c *Contract) getLatestToken(db *pgxpool.Conn, ctx context.Context, ch, usedFor, via, username string) (tokenLogEnt, error) {
 	var t tokenLogEnt
-	err := pgxscan.Get(ctx, db, &t,
-		`select * from token_logs 
-		where channel=$1 and used_for=$2 and via=$3 and username=$4 order by id desc limit 1`,
-		ch, usedFor, via, username,
-	)
+
+	sql := `select token, exp_date from token_logs where channel=$1 and used_for=$2 and via=$3 and username=$4 order by id desc limit 1`
+	err := db.QueryRow(ctx, sql, ch, usedFor, via, username).Scan(&t.Token, &t.ExpDate)
 
 	return t, err
 }
@@ -304,14 +335,16 @@ func (c *Contract) isValidPass(plain, enc string) bool {
 	return true
 }
 
-func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, username, pass string) (map[string]string, error) {
-	var userCode, userRole, userName string
+func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, username, pass string) (map[string]interface{}, error) {
+	var userID int32
+	var userCode, userRole, userName, userPhone, userEmail string
+	var userStatus bool
 	switch ch {
 	case ChannelCustApp:
 		// from customer app we can login with 3 type of auth method:
 		// username(@username), email(user@email.com), phone(+6288899999999)
 		// need to check which type to follow
-		m, err := c.GetMemberBy(db, ctx, c.getMemberField(username), username)
+		m, err := c.GetMemberBy(db, ctx, c.getMemberField(username, true), username)
 		if err != nil {
 			return nil, err
 		}
@@ -320,9 +353,9 @@ func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, u
 			return nil, errInvalidCred
 		}
 
-		if !m.IsActive {
-			return nil, errInactiveUser
-		}
+		// if !m.IsActive {
+		// 	return nil, errInactiveUser
+		// }
 
 		//check last active visit app
 		id, date, i, err := c.GetLogVisitApp(db, ctx, m.ID, "customer")
@@ -349,9 +382,14 @@ func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, u
 			}
 		}
 
+		userID = m.ID
 		userCode = m.MemberCode
 		userRole = "customer"
 		userName = m.Name
+		userStatus = m.IsActive
+		userPhone = m.Phone
+		userEmail = m.Email
+
 	case ChannelCMS:
 		// from customer app we can login only with 1 type of auth method:
 		// email(user@email.com)
@@ -389,20 +427,28 @@ func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, u
 			}
 		}
 
+		userID = u.ID
 		userCode = u.UserCode
 		userRole = u.Role
 		userName = u.Name
+		userStatus = u.IsActive
+		userPhone = u.Phone
+		userEmail = u.Email
 	default:
 		return nil, fmt.Errorf("%s", "invalid channel")
 	}
 
 	// TODO: need to save all user data to redis cache
 	token, _, _ := c.generateJWT(ch, userCode, userRole, c.Config.GetString("app.key"))
-	result := map[string]string{
-		"token":     token,
-		"user_code": userCode,
-		"user_role": userRole,
-		"user_name": userName,
+	result := map[string]interface{}{
+		"token":       token,
+		"user_id":     userID,
+		"user_code":   userCode,
+		"user_role":   userRole,
+		"user_name":   userName,
+		"user_status": userStatus,
+		"user_phone":  userPhone,
+		"user_email":  userEmail,
 	}
 
 	return result, nil
@@ -424,4 +470,63 @@ func DateEqual(date1, date2 time.Time) bool {
 	y1, m1, d1 := date1.Date()
 	y2, m2, d2 := date2.Date()
 	return y1 == y2 && m1 == m2 && d1 == d2
+}
+
+// UpdatePassword update password all roles ...
+func (c *Contract) UpdatePassword(tx pgx.Tx, ctx context.Context, ch, username, newPass string) error {
+	pass, err := bcrypt.GenerateFromPassword([]byte(newPass), 10)
+	if err != nil {
+		return err
+	}
+
+	isMember := false
+	tableName := "users"
+	if ch == ChannelCustApp {
+		isMember = true
+		tableName = "members"
+	}
+
+	sql := fmt.Sprintf("update %s set password=$1, updated_date=$2 where %s=$3", tableName, c.getMemberField(username, isMember))
+	exec, err := tx.Exec(ctx, sql, string(pass), time.Now().In(time.UTC), username)
+	if exec.RowsAffected() == 0 {
+		return fmt.Errorf("update password %s failed", tableName)
+	}
+
+	return err
+}
+
+func (c *Contract) SendingMailWSG(usedFor, subject, emailTo string, dataMail interface{}) error {
+	var err error
+
+	if utils.IsEmail(emailTo) {
+		err := c.sendDataMailWSG(usedFor, subject, emailTo, dataMail)
+		if err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+func (c *Contract) sendDataMailWSG(usedFor, subject, to string, dataMail interface{}) error {
+	var err error
+
+	// Parsing data into html
+	fn := fmt.Sprintf("%s/%s.html", c.Config.GetString("resource_path"), usedFor)
+	template, err := utils.ParseTpl(fn, dataMail)
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+
+	// Send mail with sendgrid
+	_, err = sendgrid.New(c.App).MailSender(subject, to, template)
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+
+	log.Println("Email Sent")
+
+	return err
 }

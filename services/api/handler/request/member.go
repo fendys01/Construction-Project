@@ -47,20 +47,3 @@ func (u UpdateMemberReq) Transform(m model.MemberEnt) model.MemberEnt {
 
 	return m
 }
-
-// passReq ...
-type PassReq struct {
-	OldPassword string `json:"old_password"`
-	Pass        string `json:"password"`
-}
-
-type PassPhoneReq struct {
-	Password       string `json:"password"`
-	Phone          string `json:"phone"`
-	RetypePassword string `json:"retype_password"`
-}
-
-type PassEmailReq struct {
-	Phone string `json:"phone"`
-	Email string `json:"email"`
-}

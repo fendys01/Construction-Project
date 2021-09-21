@@ -29,7 +29,7 @@ func (h *Contract) GetUserListAct(w http.ResponseWriter, r *http.Request) {
 		"limit":   10,
 		"offset":  0,
 		"sort":    "desc",
-		"order":   "u.name",
+		"order":   "name",
 		"role":    "admin",
 	}
 
@@ -269,12 +269,36 @@ func (h *Contract) AddUserAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Send Notifications - To User (Admin)
+	subject := model.NOTIF_SUBJ_TC_ADD
+	if user.Role == "admin" {
+		subject = model.NOTIF_SUBJ_ADMIN_ADD
+	}
+	adminPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "admin")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContent := model.NotificationContent{
+		TCName:    req.Name,
+		AdminName: req.Name,
+		Subject:   subject,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, adminPlayers, notifContent)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
+		return
+	}
+
 	err = m.AddNewLogVisitApp(tx, ctx, user.ID, req.Role)
 	if err != nil {
 		tx.Rollback(ctx)
 		h.SendBadRequest(w, err.Error())
 		return
 	}
+
 	// Commit transaction
 	err = tx.Commit(ctx)
 	if err != nil {
@@ -343,7 +367,7 @@ func (h *Contract) UpdateUserAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check condition if email null
-	if req.Email ==  data.Email{
+	if req.Email == data.Email {
 		data = req.Transform(data)
 		err = m.UpdateUser(tx, ctx, code, data)
 		if err != nil {
@@ -381,6 +405,21 @@ func (h *Contract) UpdateUserAct(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Activity user
+	log := model.LogActivityUserEnt{
+		UserID:    int64(data.ID),
+		Role:      h.GetUserRole(r.Context()),
+		Title:     data.Name + " has been updated their profile",
+		Activity:  "",
+		EventType: r.Method,
+	}
+	_, err = m.AddLogActivity(tx, ctx, log)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
 	// Commit transaction
 	err = tx.Commit(ctx)
 	if err != nil {
@@ -397,7 +436,7 @@ func (h *Contract) UpdateUserAct(w http.ResponseWriter, r *http.Request) {
 // UpdateUserPassAct ...
 func (h *Contract) UpdateUserPassAct(w http.ResponseWriter, r *http.Request) {
 	var err error
-	req := request.PassReq{}
+	req := request.PassOldReq{}
 	if err = h.Bind(r, &req); err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
@@ -427,7 +466,12 @@ func (h *Contract) UpdateUserPassAct(w http.ResponseWriter, r *http.Request) {
 	defer db.Release()
 
 	m := model.Contract{App: h.App}
-	// userCode := h.GetUserCode(r.Context())
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
 	user, err := m.GetUserByCode(db, ctx, code)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
@@ -440,21 +484,22 @@ func (h *Contract) UpdateUserPassAct(w http.ResponseWriter, r *http.Request) {
 	// checking old Password
 	match := CheckPasswordHash(password, user.Password)
 	log.Println("Match:   ", match)
+	if !match {
+		h.SendNotfound(w, fmt.Sprintf("Old Password %s is not match.", password))
+		return
+	}
 
-	if match {
-		pass, err := bcrypt.GenerateFromPassword([]byte(req.Pass), 10)
-		if err != nil {
-			h.SendBadRequest(w, "Error when generate password")
-			return
-		}
+	err = m.UpdatePassword(tx, ctx, h.GetChannel(r), code, req.Pass)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
 
-		err = m.UpdateUserPass(db, ctx, code, string(pass))
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			return
-		}
-	} else if !match {
-		h.SendNotfound(w, fmt.Sprintf("Password %s not found.", password))
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
 		return
 	}
 
@@ -463,6 +508,11 @@ func (h *Contract) UpdateUserPassAct(w http.ResponseWriter, r *http.Request) {
 
 // DeleteUser ...
 func (h *Contract) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	if h.GetUserRole(r.Context()) != "admin" {
+		h.SendUnAuthorizedData(w)
+		return
+	}
+
 	var err error
 	req := request.UserReqUpdate{}
 	code := chi.URLParam(r, "code")
@@ -503,6 +553,26 @@ func (h *Contract) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
+	}
+
+	// Send Notifications - To User (Admin)
+	if data.Role == "tc" {
+		adminPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "admin")
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+		notifContent := model.NotificationContent{
+			TCName:  data.Name,
+			Subject: model.NOTIF_SUBJ_TC_REMOVE,
+		}
+		_, err = m.SendNotifications(tx, db, ctx, adminPlayers, notifContent)
+		if err != nil {
+			h.SendBadRequest(w, psql.ParseErr(err))
+			tx.Rollback(ctx)
+			return
+		}
 	}
 
 	if data.Role == "tc" {

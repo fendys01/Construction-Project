@@ -10,6 +10,7 @@ import (
 
 const (
 	MIDTRANS_PAYMENT_TYPE_CREDIT_CARD      = "credit_card"
+	MIDTRANS_TRANSACTION_STATUS_PENDING    = "pending"
 	MIDTRANS_TRANSACTION_STATUS_CAPTURE    = "capture"
 	MIDTRANS_TRANSACTION_STATUS_ACCEPT     = "accept"
 	MIDTRANS_TRANSACTION_STATUS_SETTLEMENT = "settlement"
@@ -17,6 +18,7 @@ const (
 	MIDTRANS_TRANSACTION_STATUS_EXPIRE     = "expire"
 	MIDTRANS_TRANSACTION_STATUS_CANCEL     = "cancel"
 	MIDTRANS_FRAUD_STATUS_ACCEPT           = "accept"
+	DURATION_EXPIRED                       = 2 // in minutes
 )
 
 type service struct {

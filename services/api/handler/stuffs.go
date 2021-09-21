@@ -247,7 +247,7 @@ func (h *Contract) DeleteStuffAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := m.GetIsActiveStuff(db, ctx, code)
+	dataStuff, err := m.GetIsActiveStuff(db, ctx, code)
 	if err == sql.ErrNoRows {
 		h.SendNotfound(w, err.Error())
 		return
@@ -258,8 +258,8 @@ func (h *Contract) DeleteStuffAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// edit status to false
-	data.IsActive = false
-	err = m.UpdateIsActive(tx, ctx, code, data)
+	dataStuff.IsActive = false
+	err = m.UpdateIsActiveData(tx, ctx, code, dataStuff)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)

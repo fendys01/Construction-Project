@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"panorama/lib/array"
 	"panorama/lib/payment"
+	"panorama/lib/psql"
 	"panorama/services/api/handler/request"
 	"panorama/services/api/handler/response"
 	"panorama/services/api/model"
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -30,31 +32,27 @@ func (h *Contract) GetDetailItinOrderMember(w http.ResponseWriter, r *http.Reque
 
 	m := model.Contract{App: h.App}
 	code := chi.URLParam(r, "code")
-	if len(code) > 0 {
-		s, err := m.GetOrderByCode(db, ctx, code)
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			return
-		}
 
-		var res response.DetailOrderMemberResponse
-		res = res.Transform(s)
-
-		h.SendSuccess(w, res, nil)
+	s, err := m.GetOrderByCode(db, ctx, code)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
 		return
 	}
 
-	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+	var res response.DetailOrderMemberResponse
+	res = res.Transform(s)
+
+	h.SendSuccess(w, res, nil)
 }
 
 // GetItinOrderMember ...
 func (h *Contract) GetListItinOrderMember(w http.ResponseWriter, r *http.Request) {
 	param := map[string]interface{}{
-		"page":    1,
-		"limit":   10,
-		"offset":  0,
-		"sort":    "desc",
-		"order":   "o.id",
+		"page":         1,
+		"limit":        10,
+		"offset":       0,
+		"sort":         "desc",
+		"order":        "o.id",
 		"member_code":  "",
 		"expired_date": "",
 		"order_code":   "",
@@ -198,30 +196,69 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 	orderSetter.UserEnt = userTc
 
 	// Append additional detail from request into member itin
-	orderAdditionalDetails := req.AdditionalDetails
-	if len(orderAdditionalDetails) > 0 {
+	additionalDetails := req.AdditionalDetails
+	var itinDetailTemp []map[string]interface{}
+	if len(additionalDetails) > 0 {
+		for i := 0; i < len(memberItin.Details); i++ {
 
-		var m map[string]interface{}
-		md, err := json.Marshal(memberItin.Details[0])
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
+			for j := 0; j < len(additionalDetails); j++ {
+
+				md, err := json.Marshal(memberItin.Details)
+				if err != nil {
+					h.SendBadRequest(w, err.Error())
+					tx.Rollback(ctx)
+					return
+				}
+
+				temp, err := json.Marshal(itinDetailTemp)
+				if err != nil {
+					h.SendBadRequest(w, err.Error())
+					tx.Rollback(ctx)
+					return
+				}
+
+				if reflect.ValueOf(additionalDetails[j]["hotel"]).IsValid() {
+					if reflect.ValueOf(memberItin.Details[i]["hotel"]).IsValid() {
+						memberItin.Details[i]["hotel"] = additionalDetails[j]["hotel"]
+					} else {
+						if strings.Contains(string(md), "hotel") == false && strings.Contains(string(temp), "hotel") == false {
+							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
+						}
+					}
+				} else if reflect.ValueOf(additionalDetails[j]["others"]).IsValid() {
+					if reflect.ValueOf(memberItin.Details[i]["others"]).IsValid() {
+						memberItin.Details[i]["others"] = additionalDetails[j]["others"]
+					} else {
+						if strings.Contains(string(md), "others") == false && strings.Contains(string(temp), "others") == false {
+							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
+						}
+					}
+				} else if reflect.ValueOf(additionalDetails[j]["other"]).IsValid() {
+					if reflect.ValueOf(memberItin.Details[i]["other"]).IsValid() {
+						memberItin.Details[i]["other"] = additionalDetails[j]["other"]
+					} else {
+						if strings.Contains(string(md), "other") == false && strings.Contains(string(temp), "other") == false {
+							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
+						}
+					}
+				} else if reflect.ValueOf(additionalDetails[j]["flight"]).IsValid() {
+					if reflect.ValueOf(memberItin.Details[i]["flight"]).IsValid() {
+						memberItin.Details[i]["flight"] = additionalDetails[j]["flight"]
+					} else {
+						if strings.Contains(string(md), "flight") == false && strings.Contains(string(temp), "flight") == false {
+							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
+						}
+					}
+				}
+
+			}
+
 		}
 
-		err = json.Unmarshal(md, &m)
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
-		}
+	}
 
-		// TODO tambah key object sesuai kebutuhan frontend
-		if reflect.ValueOf(orderAdditionalDetails[0]["hotel"]).IsValid() {
-			m["hotel"] = orderAdditionalDetails[0]["hotel"]
-		}
-
-		memberItin.Details[0] = m
+	for _, v := range itinDetailTemp {
+		memberItin.Details = append(memberItin.Details, v)
 	}
 
 	// Update member itin detail
@@ -266,6 +303,44 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 	_, err = m.AddLogActivity(tx, ctx, log)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To Member (Customer)
+	memberPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, member.MemberCode, "customer")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentMember := model.NotificationContent{
+		Subject:   model.NOTIF_SUBJ_ORDER_INCOME,
+		TripName:  memberItin.Title,
+		OrderCode: orderSaved.OrderCode,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, memberPlayers, notifContentMember)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To User (Admin, TC)
+	userPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentUser := model.NotificationContent{
+		Subject:       model.NOTIF_SUBJ_ORDER_HISTORY,
+		TripName:      memberItin.Title,
+		StatusPayment: model.PAYMENT_STATUS_PROCESS_DESC,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
 		tx.Rollback(ctx)
 		return
 	}
@@ -344,7 +419,6 @@ func (h *Contract) UpdateOrderAct(w http.ResponseWriter, r *http.Request) {
 	// Create order payment default set expired date
 	orderPaymentSetter := model.OrderPaymentEnt{
 		OrderID:       orderExist.ID,
-		PaymentType:   model.PAYMENT_TYPE_DEFAULT,
 		Amount:        int64(req.Amount),
 		PaymentStatus: model.PAYMENT_STATUS_PROCESS,
 	}
@@ -371,6 +445,9 @@ func (h *Contract) UpdateOrderAct(w http.ResponseWriter, r *http.Request) {
 	orderPaymentSaved := model.OrderPaymentEnt{}
 	orderPayment, _ := m.GetPaymentOrderByOrderID(db, ctx, orderExist.ID)
 	if orderPayment.ID != 0 {
+		orderPaymentSetter.PaymentType = orderPayment.PaymentType
+		orderPaymentSetter.ExpiredDate = orderPayment.ExpiredDate
+		orderPaymentSetter.Payloads = orderPayment.Payloads
 		orderPaymentSaved, err = m.UpdateOrderPayment(tx, ctx, orderPaymentSetter, orderExist.ID)
 		if err != nil {
 			h.SendBadRequest(w, err.Error())
@@ -400,6 +477,25 @@ func (h *Contract) UpdateOrderAct(w http.ResponseWriter, r *http.Request) {
 	_, err = m.AddLogActivity(tx, ctx, log)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To User (Admin, TC)
+	userPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentUser := model.NotificationContent{
+		Subject:       model.NOTIF_SUBJ_ORDER_HISTORY,
+		TripName:      orderExist.MemberItin.Title,
+		StatusPayment: model.PAYMENT_STATUS_PROCESS_METHOD_DESC,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
 		tx.Rollback(ctx)
 		return
 	}
@@ -491,6 +587,10 @@ func (h *Contract) AddMidtransNotificationAct(w http.ResponseWriter, r *http.Req
 		Amount:        orderPayment.Amount,
 		PaymentStatus: paymentStatus,
 		PaymentURL:    orderPayment.PaymentURL,
+		ExpiredDate:   orderPayment.ExpiredDate,
+	}
+	if req.TransactionStatus == payment.MIDTRANS_TRANSACTION_STATUS_PENDING {
+		orderPaymentSetter.ExpiredDate = time.Now().Add(time.Minute * payment.DURATION_EXPIRED).In(time.UTC)
 	}
 
 	// Assign payload from midtrans webhook notification
@@ -510,6 +610,101 @@ func (h *Contract) AddMidtransNotificationAct(w http.ResponseWriter, r *http.Req
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)
 		return
+	}
+
+	// Send Notifications
+	if paymentStatus != model.PAYMENT_STATUS_PROCESS {
+		// Send Notifications - Assign subject with payment status
+		var subjectCust string
+		var subjectTC string
+		var itinTitle string
+		var chatRoomName string
+		var paymentStatusDesc string
+
+		if paymentStatus == model.PAYMENT_STATUS_PAID {
+			subjectCust = model.NOTIF_SUBJ_ORDER_VERIF
+			subjectTC = model.NOTIF_SUBJ_ORDER_CLIENT_COMPLETE
+			paymentStatusDesc = model.PAYMENT_STATUS_PAID_DESC
+		} else if paymentStatus == model.PAYMENT_STATUS_CANCEL {
+			subjectCust = model.NOTIF_SUBJ_ORDER_FAIL
+			subjectTC = model.NOTIF_SUBJ_ORDER_CLIENT_FAIL
+			paymentStatusDesc = model.PAYMENT_STATUS_CANCEL_DESC
+		}
+
+		// Send Notifications - To Member (Customer)
+		itinGroups, err := m.GetListMemberItinRelationByItinID(db, ctx, order.MemberItinID)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+		if len(itinGroups) > 0 && len(subjectCust) > 0 {
+			for _, itinRelation := range itinGroups {
+				role := "customer"
+				itinTitle = itinRelation.MemberItinEnt.Title
+				chatRoomName = itinRelation.ChatGroup.Name
+				memberPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, itinRelation.MemberEnt.MemberCode, role)
+				if err != nil {
+					h.SendBadRequest(w, err.Error())
+					tx.Rollback(ctx)
+					return
+				}
+				notifContentMember := model.NotificationContent{
+					Subject:       subjectCust,
+					TripName:      itinTitle,
+					OrderCode:     order.OrderCode,
+					PaymentMethod: orderPaymentSetter.PaymentType,
+				}
+				_, err = m.SendNotifications(tx, db, ctx, memberPlayers, notifContentMember)
+				if err != nil {
+					h.SendBadRequest(w, psql.ParseErr(err))
+					tx.Rollback(ctx)
+					return
+				}
+			}
+		}
+
+		// Send Notifications - To User (TC)
+		role := "tc"
+		tcPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, order.UserEnt.UserCode, role)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+		notifContentTC := model.NotificationContent{
+			Subject:    subjectTC,
+			RoomName:   chatRoomName,
+			ClientName: order.MemberEnt.Name,
+			OrderCode:  order.OrderCode,
+		}
+		_, err = m.SendNotifications(tx, db, ctx, tcPlayers, notifContentTC)
+		if err != nil {
+			h.SendBadRequest(w, psql.ParseErr(err))
+			tx.Rollback(ctx)
+			return
+		}
+
+		// Send Notifications - To User (Admin, TC)
+		if len(paymentStatusDesc) > 0 {
+			userPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "")
+			if err != nil {
+				h.SendBadRequest(w, err.Error())
+				tx.Rollback(ctx)
+				return
+			}
+			notifContentUser := model.NotificationContent{
+				Subject:       model.NOTIF_SUBJ_ORDER_HISTORY,
+				TripName:      itinTitle,
+				StatusPayment: paymentStatusDesc,
+			}
+			_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
+			if err != nil {
+				h.SendBadRequest(w, psql.ParseErr(err))
+				tx.Rollback(ctx)
+				return
+			}
+		}
 	}
 
 	// Commit transaction

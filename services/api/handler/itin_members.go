@@ -60,7 +60,7 @@ func (h *Contract) GetItinMemberList(w http.ResponseWriter, r *http.Request) {
 		"limit":       10,
 		"offset":      0,
 		"sort":        "desc",
-		"order":       "mi.id",
+		"order":       "mi.created_date",
 		"created_by":  "false",
 	}
 
@@ -89,30 +89,29 @@ func (h *Contract) GetItinMemberList(w http.ResponseWriter, r *http.Request) {
 		param["keyword"] = keyword[0]
 	}
 
-	if c, ok := r.URL.Query()["created_by"]; ok && c[0] == "true" {
-		param["created_by"] = h.GetUserCode(r.Context())
-	} else {
-		param["created_by"] = ""
-	}
-
 	if limit, ok := r.URL.Query()["limit"]; ok {
 		if l, err := strconv.Atoi(limit[0]); err == nil {
 			param["limit"] = l
 		}
 	}
 
+	if c, ok := r.URL.Query()["created_by"]; ok && c[0] == "true" {
+		param["created_by"] = h.GetUserCode(r.Context())
+	} else {
+		param["created_by"] = ""
+	}
+
 	param["offset"] = (param["page"].(int) - 1) * param["limit"].(int)
 
+	m := model.Contract{App: h.App}
 	ctx := context.Background()
 	db, err := h.DB.Acquire(ctx)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
 	}
-
 	defer db.Release()
 
-	m := model.Contract{App: h.App}
 	members, err := m.GetListItinMember(db, ctx, param)
 	if err != nil && sql.ErrNoRows != nil {
 		h.SendBadRequest(w, err.Error())
@@ -194,6 +193,12 @@ func (h *Contract) DelMemberItinAct(w http.ResponseWriter, r *http.Request) {
 
 // AddMemberItinAct add new member itinerary
 func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
+	role := h.GetUserRole(r.Context())
+	if role == "admin" {
+		h.SendUnAuthorizedData(w)
+		return
+	}
+
 	// Initial response handler
 	var res response.ItinMemberResponse
 
@@ -211,25 +216,19 @@ func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check request start date & end date
-	startDate, err := time.Parse("2006-01-02 15:04:05", req.StartDate)
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		return
-	}
-	endDate, err := time.Parse("2006-01-02 15:04:05", req.EndDate)
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		return
-	}
-	if startDate.After(endDate) {
-		h.SendBadRequest(w, "Start date should not be more end date")
-		return
-	}
-
-	// validation if tc create member itin for member
-	if h.GetUserRole(r.Context()) == "tc" {
-		if len(req.GroupChatCode) <= 0 {
-			h.SendBadRequest(w, "Group chat code required")
+	if req.StartDate != "" && req.EndDate != "" {
+		startDate, err := time.Parse("2006-01-02 15:04:05", req.StartDate)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			return
+		}
+		endDate, err := time.Parse("2006-01-02 15:04:05", req.EndDate)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			return
+		}
+		if startDate.After(endDate) {
+			h.SendBadRequest(w, "Start date should not be more end date")
 			return
 		}
 	}
@@ -271,10 +270,21 @@ func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
 	}
 	memberItinFormatted.CreatedBy = memberOwner.ID
 
+	// Set order type
+	orderType := model.ORDER_TYPE_REGULER
+	if req.OrderType != "" {
+		if req.OrderType != model.ORDER_TYPE_REGULER && req.OrderType != model.ORDER_TYPE_CUSTOM {
+			h.SendBadRequest(w, fmt.Sprintf("invalid order type %s or %s", model.ORDER_TYPE_REGULER, model.ORDER_TYPE_CUSTOM))
+			tx.Rollback(ctx)
+			return
+		}
+		orderType = req.OrderType
+	}
+
 	// Create member itin
-	memberItinCreated, err := m.AddMemberItin(tx, ctx, memberItinFormatted)
+	memberItinCreated, err := m.AddMemberItin(tx, ctx, memberItinFormatted, orderType)
 	if err != nil {
-		h.SendBadRequest(w, err.Error())
+		h.SendBadRequest(w, psql.ParseErr(err))
 		tx.Rollback(ctx)
 		return
 	}
@@ -283,7 +293,14 @@ func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
 	activityProcess := fmt.Sprintf("Add New Trip Itin %s", memberItinCreated.Title)
 
 	// Assign order if user tc input member itin
-	if req.MemberCode != "" {
+	if role == "tc" {
+		// Validation if tc create member itin for member
+		if len(req.GroupChatCode) <= 0 {
+			h.SendBadRequest(w, "Group chat code required")
+			return
+		}
+
+		// Check TC input
 		tcCode := h.GetUserCode(r.Context())
 		userTc, _ := m.GetUserByCode(db, ctx, tcCode)
 		if userTc.ID == 0 {
@@ -293,18 +310,69 @@ func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
 		}
 		userID = userTc.ID
 		activityProcess = fmt.Sprintf("Add New Trip Itin %s for %s", memberItinCreated.Title, memberOwner.Name)
+
+		// Assign order itin from tc
 		orderFormatted := model.OrderEnt{
 			MemberItinID: memberItinCreated.ID,
 			PaidBy:       memberItinCreated.CreatedBy,
 			OrderCode:    m.SetOrderCode(),
 			OrderStatus:  model.ORDER_STATUS_PENDING,
 			TotalPrice:   memberItinCreated.EstPrice.Int64,
-			OrderType:    model.ORDER_TYPE_REGULER,
+			OrderType:    orderType,
 			TcID:         userTc.ID,
 		}
-		_, err = m.AddOrder(tx, ctx, orderFormatted)
+		order, err := m.AddOrder(tx, ctx, orderFormatted)
+		if err != nil {
+			h.SendBadRequest(w, psql.ParseErr(err))
+			tx.Rollback(ctx)
+			return
+		}
+
+		// Assign member itin to chat group
+		if len(req.GroupChatCode) > 0 {
+			err = m.UpdateItinMemberToChat(ctx, tx, memberItinCreated.ID, userTc.ID, req.GroupChatCode)
+			if err != nil {
+				h.SendBadRequest(w, err.Error())
+				tx.Rollback(ctx)
+				return
+			}
+			memberItinCreated.ChatGroupCode = req.GroupChatCode
+		}
+
+		// Send Notifications - To Member (Customer)
+		memberPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, memberOwner.MemberCode, "customer")
 		if err != nil {
 			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+		notifContentMember := model.NotificationContent{
+			Subject:   model.NOTIF_SUBJ_ORDER_INCOME,
+			TripName:  memberItinCreated.Title,
+			OrderCode: order.OrderCode,
+		}
+		_, err = m.SendNotifications(tx, db, ctx, memberPlayers, notifContentMember)
+		if err != nil {
+			h.SendBadRequest(w, psql.ParseErr(err))
+			tx.Rollback(ctx)
+			return
+		}
+
+		// Send Notifications - To User (Admin, TC)
+		userPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "")
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+		notifContentUser := model.NotificationContent{
+			Subject:       model.NOTIF_SUBJ_ORDER_HISTORY,
+			TripName:      memberItinCreated.Title,
+			StatusPayment: model.PAYMENT_STATUS_PROCESS_DESC,
+		}
+		_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
+		if err != nil {
+			h.SendBadRequest(w, psql.ParseErr(err))
 			tx.Rollback(ctx)
 			return
 		}
@@ -340,7 +408,7 @@ func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
 					}
 					memberItinRelationCreated, err := m.AddMemberItinRelation(tx, ctx, memberItinRelationFormatted)
 					if err != nil {
-						h.SendBadRequest(w, err.Error())
+						h.SendBadRequest(w, psql.ParseErr(err))
 						tx.Rollback(ctx)
 						return
 					}
@@ -413,16 +481,6 @@ func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// assign member itin to chat group
-	if len(req.GroupChatCode) > 0 {
-		err = m.UpdateItinMemberToChat(ctx, tx, memberItinCreated.ID, req.GroupChatCode)
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
-		}
-	}
-
 	// Commit transaction
 	err = tx.Commit(ctx)
 	if err != nil {
@@ -436,6 +494,15 @@ func (h *Contract) AddMemberItinAct(w http.ResponseWriter, r *http.Request) {
 
 // UpdateMemberItinAct edit member itinerary
 func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
+
+	var mTemp, mRel []string
+
+	role := h.GetUserRole(r.Context())
+	if role == "admin" {
+		h.SendUnAuthorizedData(w)
+		return
+	}
+
 	// Initial response handler and param code
 	var res response.ItinMemberResponse
 	code := chi.URLParam(r, "code")
@@ -453,20 +520,30 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// validate requeired if want invite friend to itin
+	if len(req.GroupMembers) > 0 {
+		if len(req.GroupChatCode) <= 0 {
+			h.SendBadRequest(w, "Group chat code required")
+			return
+		}
+	}
+
 	// Check request start date & end date
-	startDate, err := time.Parse("2006-01-02 15:04:05", req.StartDate)
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		return
-	}
-	endDate, err := time.Parse("2006-01-02 15:04:05", req.EndDate)
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		return
-	}
-	if startDate.After(endDate) {
-		h.SendBadRequest(w, "Start date should not be more end date")
-		return
+	if req.StartDate != "" && req.EndDate != "" {
+		startDate, err := time.Parse("2006-01-02 15:04:05", req.StartDate)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			return
+		}
+		endDate, err := time.Parse("2006-01-02 15:04:05", req.EndDate)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			return
+		}
+		if startDate.After(endDate) {
+			h.SendBadRequest(w, "Start date should not be more end date")
+			return
+		}
 	}
 
 	// Check db context
@@ -518,6 +595,17 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set order type
+	orderType := model.ORDER_TYPE_REGULER
+	if req.OrderType != "" {
+		if req.OrderType != model.ORDER_TYPE_REGULER && req.OrderType != model.ORDER_TYPE_CUSTOM {
+			h.SendBadRequest(w, fmt.Sprintf("invalid order type %s or %s", model.ORDER_TYPE_REGULER, model.ORDER_TYPE_CUSTOM))
+			tx.Rollback(ctx)
+			return
+		}
+		orderType = req.OrderType
+	}
+
 	// Update member itin
 	memberItinUpdated, err := m.UpdateMemberItin(tx, ctx, memberItinFormatted, code)
 	if err != nil {
@@ -532,7 +620,14 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 	activityProcess := fmt.Sprintf("Update Trip Itin %s", memberItinUpdated.Title)
 
 	// ReAssign order if user tc edit member itin
-	if req.MemberCode != "" {
+	if role == "tc" {
+		// Validation if tc create member itin for member
+		if len(req.GroupChatCode) <= 0 {
+			h.SendBadRequest(w, "Group chat code required")
+			return
+		}
+
+		// Check TC input
 		tcCode := h.GetUserCode(r.Context())
 		userTc, _ := m.GetUserByCode(db, ctx, tcCode)
 		if userTc.ID == 0 {
@@ -542,11 +637,13 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 		}
 		userID = userTc.ID
 		activityProcess = fmt.Sprintf("Update Trip Itin %s for %s", memberItinUpdated.Title, memberOwner.Name)
+
+		// Assign order itin from tc
 		orderFormatted := model.OrderEnt{
 			PaidBy:      memberOwner.ID,
 			OrderStatus: model.ORDER_STATUS_PENDING,
 			TotalPrice:  memberItinUpdated.EstPrice.Int64,
-			OrderType:   model.ORDER_TYPE_REGULER,
+			OrderType:   orderType,
 			TcID:        userTc.ID,
 		}
 		updatedOrder, err := m.UpdateOrderByMemberItinID(tx, ctx, orderFormatted, memberItinUpdated.ID)
@@ -555,7 +652,7 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 			orderFormatted.OrderCode = m.SetOrderCode()
 			_, err = m.AddOrder(tx, ctx, orderFormatted)
 			if err != nil {
-				h.SendBadRequest(w, err.Error())
+				h.SendBadRequest(w, psql.ParseErr(err))
 				tx.Rollback(ctx)
 				return
 			}
@@ -564,6 +661,16 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 			h.SendBadRequest(w, err.Error())
 			tx.Rollback(ctx)
 			return
+		}
+
+		// Assign member itin to chat group
+		if len(req.GroupChatCode) > 0 {
+			err = m.UpdateItinMemberToChat(ctx, tx, memberItinUpdated.ID, userTc.ID, req.GroupChatCode)
+			if err != nil {
+				h.SendBadRequest(w, err.Error())
+				tx.Rollback(ctx)
+				return
+			}
 		}
 	}
 
@@ -579,6 +686,15 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 		"itin_code":       memberItinUpdated.ItinCode,
 	})
 	if len(req.GroupMembers) > 0 {
+
+		// get chat group id
+		chatGroupID, err := m.GetIDGroupChatByCode(db, ctx, req.GroupChatCode)
+		if err != nil && chatGroupID <= 0 {
+			h.SendNotfound(w, fmt.Sprintf("Chat Group with code %s not found.", req.GroupChatCode))
+			tx.Rollback(ctx)
+			return
+		}
+
 		for _, groupMember := range req.GroupMembers {
 			memberGroupEmail := fmt.Sprintf("%s", groupMember["member_email"])
 			if memberGroupEmail != "" && memberOwner.Email != memberGroupEmail {
@@ -600,7 +716,7 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 						}
 						memberItinRelationCreated, err := m.AddMemberItinRelation(tx, ctx, memberItinRelationFormatted)
 						if err != nil {
-							h.SendBadRequest(w, err.Error())
+							h.SendBadRequest(w, psql.ParseErr(err))
 							tx.Rollback(ctx)
 							return
 						}
@@ -615,6 +731,9 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 							"is_owner":        false,
 							"itin_code":       memberItinUpdated.ItinCode,
 						})
+
+						// append email member for query add to chat group relation
+						mRel = append(mRel, "("+strconv.Itoa(int(memberGroup.ID))+","+strconv.Itoa(int(chatGroupID))+",current_timestamp)")
 					} else {
 						memberRelationExist.MemberEnt = memberGroup
 						memberItinGroups = append(memberItinGroups, map[string]interface{}{
@@ -665,6 +784,10 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 							tx.Rollback(ctx)
 							return
 						}
+
+						// append email member for query add to chat group temporary
+						mTemp = append(mTemp, "('"+memberTempCreated.Email+"',"+strconv.Itoa(int(chatGroupID))+",current_timestamp)")
+
 					} else {
 						memberTempExist.MemberItin = memberItinUpdated
 						memberItinGroups = append(memberItinGroups, map[string]interface{}{
@@ -681,6 +804,27 @@ func (h *Contract) UpdateMemberItinAct(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+
+		// add member temporary to chat member temporary
+		if len(mTemp) > 0 {
+			err = m.AddChatMemberTempBatch(ctx, tx, strings.Join(mTemp, ","))
+			if err != nil {
+				h.SendBadRequest(w, psql.ParseErr(err))
+				tx.Rollback(ctx)
+				return
+			}
+		}
+
+		// add member is active to chat group relation
+		if len(mRel) > 0 {
+			err = m.AddChatGroupRelationBatch(ctx, tx, strings.Join(mRel, ","))
+			if err != nil {
+				h.SendBadRequest(w, psql.ParseErr(err))
+				tx.Rollback(ctx)
+				return
+			}
+		}
+
 	}
 	if len(memberItinGroups) > 0 {
 		memberItinUpdated.GroupMembers = memberItinGroups

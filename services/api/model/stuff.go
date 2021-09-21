@@ -156,7 +156,7 @@ func (c *Contract) UpdateStuff(tx pgx.Tx, ctx context.Context, code string, s St
 }
 
 // Update IsActive Member.
-func (c *Contract) UpdateIsActive(tx pgx.Tx, ctx context.Context, code string, s StuffEnt) error {
+func (c *Contract) UpdateIsActiveData(tx pgx.Tx, ctx context.Context, code string, s StuffEnt) error {
 
 	var ID int32
 

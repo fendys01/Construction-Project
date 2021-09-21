@@ -72,6 +72,10 @@ func (h *App) GetChannel(r *http.Request) string {
 	return r.Header.Get(XChannelHeader)
 }
 
+func (h *App) GetPlayer(r *http.Request) string {
+	return r.Header.Get(XPlayer)
+}
+
 // GetToken ...
 func (h *App) GetToken(r *http.Request) string {
 	return r.Header.Get(AuthHeader)
@@ -88,6 +92,16 @@ func (h *App) SendSuccess(w http.ResponseWriter, payload interface{}, pagination
 		pagination = h.EmptyJSONArr()
 	}
 	h.RespondWithJSON(w, 200, MsgSuccess, "Success", payload, pagination)
+}
+
+func (h *App) SendSuccessCustomMsg(w http.ResponseWriter, payload interface{}, pagination interface{}, message string) {
+	if pagination == nil {
+		pagination = h.EmptyJSONArr()
+	}
+	if len(message) <= 0 {
+		message = "Success"
+	}
+	h.RespondWithJSON(w, 200, MsgSuccess, message, payload, pagination)
 }
 
 // SendBadRequest send bad request into response with 400 http code.
