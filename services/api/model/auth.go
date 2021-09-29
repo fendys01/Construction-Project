@@ -155,7 +155,7 @@ func (c *Contract) sendDataMail(usedFor, subject, to string, dataMail interface{
 	// SMTP client
 	smtpClient, err := server.Connect()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 		return
 	}
 
@@ -163,6 +163,7 @@ func (c *Contract) sendDataMail(usedFor, subject, to string, dataMail interface{
 	tpl, err := utils.ParseTpl(fn, dataMail)
 	if err != nil {
 		fmt.Println(err.Error())
+		return
 	}
 
 	// New email simple html with inline and CC
@@ -174,13 +175,15 @@ func (c *Contract) sendDataMail(usedFor, subject, to string, dataMail interface{
 
 	email.SetBody(mail.TextHTML, tpl)
 	if email.Error != nil {
-		log.Fatal(email.Error)
+		log.Println(email.Error)
+		return
 	}
 
 	// Call Send and pass the client
 	err = email.Send(smtpClient)
 	if err != nil {
 		log.Println(err)
+		return
 	} else {
 		log.Println("Email Sent")
 	}

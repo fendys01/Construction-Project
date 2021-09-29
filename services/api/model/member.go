@@ -72,9 +72,9 @@ func (c *Contract) createMemberCode() string {
 }
 
 // ActivateAndSetPhoneValid ...
-func (c *Contract) ActivateAndSetPhoneValid(tx pgx.Tx, ctx context.Context, phone string) error {
+func (c *Contract) ActivateAndSetPhoneValid(db *pgxpool.Conn, ctx context.Context, phone string) error {
 	sql := `update members set is_active=$1, is_valid_phone=$2, updated_date=$3 where phone=$4;`
-	_, err := tx.Exec(ctx, sql, true, true, time.Now().In(time.UTC), phone)
+	_, err := db.Exec(ctx, sql, true, true, time.Now().In(time.UTC), phone)
 
 	return err
 }

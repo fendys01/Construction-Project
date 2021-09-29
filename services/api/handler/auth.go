@@ -186,7 +186,6 @@ func (h *Contract) AuthCheckTokenPhoneAct(w http.ResponseWriter, r *http.Request
 	defer db.Release()
 
 	m := model.Contract{App: h.App}
-	tx, err := db.Begin(ctx)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
@@ -194,21 +193,12 @@ func (h *Contract) AuthCheckTokenPhoneAct(w http.ResponseWriter, r *http.Request
 
 	if err = m.ValidateToken(db, ctx, h.GetChannel(r), model.ActRegPhone, req.Phone, req.Token); err != nil {
 		h.SendBadRequest(w, err.Error())
-		tx.Rollback(ctx)
 		return
 	}
 
 	// activate and set the phone validation flag to true
-	if err = m.ActivateAndSetPhoneValid(tx, ctx, req.Phone); err != nil {
+	if err = m.ActivateAndSetPhoneValid(db, ctx, req.Phone); err != nil {
 		h.SendBadRequest(w, err.Error())
-		tx.Rollback(ctx)
-		return
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		tx.Rollback(ctx)
 		return
 	}
 
@@ -275,21 +265,22 @@ func (h *Contract) LoginAct(w http.ResponseWriter, r *http.Request) {
 		userToken = ""
 		responseMessage = fmt.Sprintf("Account %s has been registered and need activated", userEmail)
 
+		// 1. need send token for phone validations again only app
 		if channel == model.ChannelCustApp {
 			rand.Seed(time.Now().UnixNano())
 			otp, _ = utils.Generate(`[\d]{4}`)
-		}
 
-		// 1. need send token for phone validations again only app
-		if channel == model.ChannelCustApp {
-			if otp, err = m.SendToken(db, ctx, channel, model.ActRegPhone, model.TokenViaPhone, userPhone, userRole, otp); err != nil {
+			if _, err = m.SendToken(db, ctx, channel, model.ActRegPhone, model.TokenViaPhone, userPhone, userRole, otp); err != nil {
 				fmt.Printf("error send token phone: %s", err.Error())
 			}
-		}
-
-		// 2. need send token for email validations again both of channel app & cms
-		if otp, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, otp); err != nil {
-			fmt.Printf("error send token email: %s", err.Error())
+			// 2. need send token for email validations again both of channel app & cms
+			if _, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, otp); err != nil {
+				fmt.Printf("error send token email: %s", err.Error())
+			}
+		} else if channel == model.ChannelCMS {
+			if otp, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, otp); err != nil {
+				fmt.Printf("error send token email: %s", err.Error())
+			}
 		}
 	}
 
@@ -411,16 +402,18 @@ func (h *Contract) ForgotPassAct(w http.ResponseWriter, r *http.Request) {
 	if userID != 0 && !userStatus {
 		// 1. need send token for phone validations again only app
 		if channel == model.ChannelCustApp {
-			if token, err = m.SendToken(db, ctx, channel, model.ActRegPhone, model.TokenViaPhone, userPhone, userRole, token); err != nil {
+			if _, err = m.SendToken(db, ctx, channel, model.ActRegPhone, model.TokenViaPhone, userPhone, userRole, token); err != nil {
 				fmt.Printf("error send token phone: %s", err.Error())
 			}
+			// 2. need send token for email validations again both of channel app & cms
+			if _, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, token); err != nil {
+				fmt.Printf("error send token email: %s", err.Error())
+			}
+		} else if channel == model.ChannelCMS {
+			if token, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, token); err != nil {
+				fmt.Printf("error send token email: %s", err.Error())
+			}
 		}
-
-		// 2. need send token for email validations again both of channel app & cms
-		if token, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, token); err != nil {
-			fmt.Printf("error send token email: %s", err.Error())
-		}
-
 		responseMessage = fmt.Sprintf("Account %s has been registered and need activated", userEmail)
 	} else {
 		token, err = m.SendToken(db, ctx, h.GetChannel(r), model.ActForgotPass, viaName, req.Username, userRole, token)
@@ -611,16 +604,17 @@ func (h *Contract) SendTokenAct(w http.ResponseWriter, r *http.Request) {
 
 	// Act type
 	if typeToken == "register" && userID != 0 && !userStatus {
-		// 1. need send token for phone validations again only app
 		if channel == model.ChannelCustApp {
-			if token, err = m.SendToken(db, ctx, channel, model.ActRegPhone, model.TokenViaPhone, userPhone, userRole, token); err != nil {
+			if _, err = m.SendToken(db, ctx, channel, model.ActRegPhone, model.TokenViaPhone, userPhone, userRole, token); err != nil {
 				fmt.Printf("error send token phone: %s", err.Error())
 			}
-		}
-
-		// 2. need send token for email validations again both of channel app & cms
-		if token, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, token); err != nil {
-			fmt.Printf("error send token email: %s", err.Error())
+			if _, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, token); err != nil {
+				fmt.Printf("error send token email: %s", err.Error())
+			}
+		} else if channel == model.ChannelCMS {
+			if token, err = m.SendToken(db, ctx, channel, model.ActRegEmail, model.TokenViaEmail, userEmail, userRole, token); err != nil {
+				fmt.Printf("error send token email: %s", err.Error())
+			}
 		}
 	} else {
 		actType := model.ActChangePass
