@@ -12,6 +12,7 @@ type MemberResponse struct {
 	MemberCode     string `json:"member_code"`
 	Username       string `json:"username"`
 	Name           string `json:"name"`
+	Gender         string `json:"Gender"`
 	Email          string `json:"email"`
 	Phone          string `json:"phone"`
 	Img            string `json:"image"`
@@ -43,6 +44,7 @@ func (r MemberResponse) Transform(m model.MemberEnt) MemberResponse {
 	r.MemberCode = m.MemberCode
 	r.Username = m.Username
 	r.Name = m.Name
+	r.Gender = m.Gender
 	r.Email = m.Email
 	r.Phone = m.Phone
 	r.LastActiveDate = date
@@ -56,6 +58,7 @@ func (r MemberResponse) Transform(m model.MemberEnt) MemberResponse {
 type MemberDetailResponse struct {
 	MemberCode           string               `json:"member_code"`
 	Name                 string               `json:"name"`
+	Gender               string               `json:"Gender"`
 	Img                  string               `json:"image"`
 	LastSeen             string               `json:"last_seen"`
 	DetailActivityMember DetailActivityMember `json:"summary_activity"`
@@ -85,6 +88,7 @@ func (r MemberDetailResponse) Transform(m model.MemberEnt) MemberDetailResponse 
 
 	r.MemberCode = m.MemberCode
 	r.Name = m.Name
+	r.Gender = m.Gender
 	r.DetailActivityMember = r.DetailActivityMember.Transform(m)
 
 	var listResponse []RecentActivityUser

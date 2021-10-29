@@ -21,6 +21,7 @@ type MemberEnt struct {
 	ID              int32
 	MemberCode      string
 	Name            string
+	Gender            string
 	Username        string
 	Email           string
 	Phone           string
@@ -101,9 +102,9 @@ func (c *Contract) AddMember(tx pgx.Tx, ctx context.Context, m MemberEnt) (Membe
 	pass, _ := bcrypt.GenerateFromPassword([]byte(m.Password), 10)
 	m.MemberCode = c.createMemberCode()
 
-	err := tx.QueryRow(ctx, `insert into members (member_code, name, username, email, phone, password, img,is_active, created_date,updated_date) 
-		values($1, $2, $3, $4, $5, $6, $7,$8,$9,$10) RETURNING id`,
-		m.MemberCode, m.Name, m.Username, m.Email, m.Phone, pass, m.Img, m.IsActive, time.Now().In(time.UTC), time.Now().In(time.UTC),
+	err := tx.QueryRow(ctx, `insert into members (member_code, name, gender, username, email, phone, password, img,is_active, created_date,updated_date) 
+		values($1, $2, $3, $4, $5, $6, $7,$8,$9,$10,$11) RETURNING id`,
+		m.MemberCode, m.Name, m.Gender, m.Username, m.Email, m.Phone, pass, m.Img, m.IsActive, time.Now().In(time.UTC), time.Now().In(time.UTC),
 	).Scan(&lastInsID)
 
 	m.ID = lastInsID

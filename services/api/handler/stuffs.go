@@ -45,7 +45,8 @@ func (h *Contract) AddStuffAct(w http.ResponseWriter, r *http.Request) {
 		Image:        sql.NullString{String: req.Image, Valid: true},
 		Description:  req.Description,
 		Price:     	  req.Price,
-		Type:         req.Type,
+		Type:         int32(req.Type),
+		IsActive: 	  req.IsActive,
 		CreatedDate:  time.Time{},
 	})
 	if err != nil {

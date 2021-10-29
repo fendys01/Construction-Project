@@ -11,7 +11,8 @@ type AddStuffReq struct {
 	Image           string `json:"image" validate:"required"`
 	Description     string `json:"description" validate:"required"`
 	Price        	string `json:"price" validate:"required"`
-	Type            int32  `json:"type"`
+	Type            int  `json:"type"`
+	IsActive 		bool   `json:"is_active"`
 }
 
 type StuffReqUpdate struct {
@@ -19,7 +20,7 @@ type StuffReqUpdate struct {
 	Image    		string `json:"email"`
 	Description     string `json:"password"`
 	Price    		string `json:"phone"`
-	Type     		int32  `json:"type"`
+	Type     		int  `json:"type"`
 	IsActive 		string `json:"is_active"`
 }
 
@@ -43,9 +44,9 @@ func (s StuffReqUpdate) Transform(m model.StuffEnt) model.StuffEnt {
 		m.Price = s.Price
 	}
 
-	// if len(s.Type) > 0 {
-	// 	m.Type = s.Type
-	// }
+	if s.Type > 0 {
+		m.Type = int32(s.Type)
+	}
 
 	if len(s.IsActive) > 0 {
 		a, _ := strconv.ParseBool(s.IsActive)

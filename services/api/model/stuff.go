@@ -39,7 +39,7 @@ func (c *Contract) SetStuffCode() string {
 func (c *Contract) AddStuff(db *pgxpool.Conn, ctx context.Context, s StuffEnt) (StuffEnt, error) {
 	var lastInsID int32
 	s.Code = c.SetStuffCode()
-	err := db.QueryRow(ctx, `insert into stuff (code, name, image, description , price, type, created_date) 
+	err := db.QueryRow(ctx, `insert into stuff (code_stuff, name_stuff, image, description , price, type, created_date) 
 		values($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
 		s.Code, s.Name, s.Image, s.Description, s.Price, s.Type, time.Now().In(time.UTC),
 	).Scan(&lastInsID)

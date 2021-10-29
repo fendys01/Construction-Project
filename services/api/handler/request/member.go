@@ -6,6 +6,7 @@ import "panorama/services/api/model"
 type AddMemberReq struct {
 	Username       string `json:"username" validate:"required"`
 	Name           string `json:"name" validate:"required"`
+	Gender         string `json:"gender" validate:"required"`
 	Email          string `json:"email" validate:"required,email"`
 	Phone          string `json:"phone" validate:"required"`
 	Img            string `json:"image"`
@@ -17,6 +18,7 @@ type AddMemberReq struct {
 type UpdateMemberReq struct {
 	Username string `json:"username"`
 	Name     string `json:"name"`
+	Gender   string `json:"gender"`
 	Email    string `json:"email"`
 	Phone    string `json:"phone"`
 	Img      string `json:"image"`
@@ -32,6 +34,11 @@ func (u UpdateMemberReq) Transform(m model.MemberEnt) model.MemberEnt {
 	if len(u.Name) > 0 {
 		m.Name = u.Name
 	}
+
+	if len(u.Gender) > 0 {
+		m.Gender = u.Gender
+	}
+
 
 	if len(u.Email) > 0 {
 		m.Email = u.Email

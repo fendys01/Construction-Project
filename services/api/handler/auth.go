@@ -76,6 +76,7 @@ func (h *Contract) RegisterAct(w http.ResponseWriter, r *http.Request) {
 	} else {
 		member, err = m.AddMember(tx, context.Background(), model.MemberEnt{
 			Name:     req.Name,
+			Gender:   req.Gender,
 			Username: req.Username,
 			Email:    req.Email,
 			Phone:    req.Phone,

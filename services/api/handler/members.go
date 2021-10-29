@@ -58,6 +58,7 @@ func (h *Contract) AddMemberAct(w http.ResponseWriter, r *http.Request) {
 	member, err := m.AddMember(tx, ctx, model.MemberEnt{
 		Username: req.Username,
 		Name:     req.Name,
+		Gender:   req.Gender,
 		Email:    req.Email,
 		Phone:    req.Phone,
 		Img:      sql.NullString{String: req.Img, Valid: true},
