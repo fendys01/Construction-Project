@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/url"
 	"panorama/bootstrap"
 	"panorama/lib/citcall"
 	"panorama/lib/sendgrid"
@@ -16,6 +17,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/spf13/viper"
 	mail "github.com/xhit/go-simple-mail/v2"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -195,54 +197,100 @@ func (c *Contract) SendToken(db *pgxpool.Conn, ctx context.Context, ch, usedFor,
 		return "", fmt.Errorf("%s", "send token invalid action")
 	}
 
-	if !c.isUsernameExists(db, ctx, ch, username) {
-		return "", fmt.Errorf("user doesn't exists")
-	}
-
 	var token string
-	dataMail := DataEmailToken{
-		ExpiredTime: tokenExpiredMin,
-	}
-
-	switch ch {
-	case ChannelCustApp:
-		newToken, err := c.addNewToken(db, ctx, ch, usedFor, via, username, tokenParam)
-		if err != nil {
-			return "", err
+	if  !c.isUsernameExists(db, ctx, ch, username) && usedFor != "change-phone" {
+		dataMail := DataEmailToken{
+			ExpiredTime: tokenExpiredMin,
 		}
-
-		token = newToken
-		dataMail.Title = "OTP"
-		dataMail.TokenURL = token
-		dataMail.IsChannelApp = true
-		dataMail.Description = "Please input the 4 digit code"
-
-		if via == TokenViaEmail {
-			go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
-		}
-
-		if via == TokenViaPhone {
-			// Send SMS with token
-			sms, err := citcall.New(c.App).SendOTP(username, token, tokenExpiredMin)
+	
+		switch ch {
+		case ChannelCustApp:
+			newToken, err := c.addNewToken(db, ctx, ch, usedFor, via, username, tokenParam)
 			if err != nil {
 				return "", err
 			}
-			if sms.RC != citcall.STATUS_OK {
-				return "", fmt.Errorf("citcall response = code: %d, description: %s", sms.RC, sms.Info)
+	
+			token = newToken
+			dataMail.Title = "OTP"
+			dataMail.TokenURL = token
+			dataMail.IsChannelApp = true
+			dataMail.Description = "Please input the 4 digit code"
+	
+			if via == TokenViaEmail {
+				go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
+			}
+	
+			if via == TokenViaPhone {
+				// Send SMS with token
+				sms, err := citcall.New(c.App).SendOTP(username, token, tokenExpiredMin)
+				if err != nil {
+					return "", err
+				}
+				if sms.RC != citcall.STATUS_OK {
+					return "", fmt.Errorf("citcall response = code: %d, description: %s", sms.RC, sms.Info)
+				}
+			}
+	
+		case ChannelCMS:
+			tokenJWT, _, _ := c.generateJWT(ch, username, role, c.Config.GetString("app.key"))
+			token = tokenJWT
+	
+			dataMail.Title = "Link"
+			dataMail.IsChannelApp = false
+			dataMail.TokenURL = fmt.Sprintf("%s/%s?token=%s", urlCms, urlCMSLink[usedFor], tokenJWT)
+			dataMail.Description = "Please click the link"
+	
+			if via == TokenViaEmail {
+				go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
 			}
 		}
-
-	case ChannelCMS:
-		tokenJWT, _, _ := c.generateJWT(ch, username, role, c.Config.GetString("app.key"))
-		token = tokenJWT
-
-		dataMail.Title = "Link"
-		dataMail.IsChannelApp = false
-		dataMail.TokenURL = fmt.Sprintf("%s/%s?token=%s", urlCms, urlCMSLink[usedFor], tokenJWT)
-		dataMail.Description = "Please click the link"
-
-		if via == TokenViaEmail {
-			go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
+	} else if !c.isUsernameExists(db, ctx, ch, username) {
+		return "", fmt.Errorf("%s", "user doesn't exists")
+	} else {
+		dataMail := DataEmailToken{
+			ExpiredTime: tokenExpiredMin,
+		}
+	
+		switch ch {
+		case ChannelCustApp:
+			newToken, err := c.addNewToken(db, ctx, ch, usedFor, via, username, tokenParam)
+			if err != nil {
+				return "", err
+			}
+	
+			token = newToken
+			dataMail.Title = "OTP"
+			dataMail.TokenURL = token
+			dataMail.IsChannelApp = true
+			dataMail.Description = "Please input the 4 digit code"
+	
+			if via == TokenViaEmail {
+				go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
+			}
+	
+			if via == TokenViaPhone {
+				// Send SMS with token
+				sms, err := citcall.New(c.App).SendOTP(username, token, tokenExpiredMin)
+				if err != nil {
+					return "", err
+				}
+				if sms.RC != citcall.STATUS_OK {
+					return "", fmt.Errorf("citcall response = code: %d, description: %s", sms.RC, sms.Info)
+				}
+			}
+	
+		case ChannelCMS:
+			tokenJWT, _, _ := c.generateJWT(ch, username, role, c.Config.GetString("app.key"))
+			token = tokenJWT
+	
+			dataMail.Title = "Link"
+			dataMail.IsChannelApp = false
+			dataMail.TokenURL = fmt.Sprintf("%s/%s?token=%s", urlCms, urlCMSLink[usedFor], tokenJWT)
+			dataMail.Description = "Please click the link"
+	
+			if via == TokenViaEmail {
+				go c.sendDataMail(usedFor, tokenMailSubj[usedFor], username, dataMail)
+			}
 		}
 	}
 
@@ -340,7 +388,7 @@ func (c *Contract) isValidPass(plain, enc string) bool {
 
 func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, username, pass string) (map[string]interface{}, error) {
 	var userID int32
-	var userCode, userRole, userName, userPhone, userEmail string
+	var userCode, userRole, userName, userPhone, userEmail, userImage string
 	var userStatus bool
 	switch ch {
 	case ChannelCustApp:
@@ -389,6 +437,16 @@ func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, u
 		userCode = m.MemberCode
 		userRole = "customer"
 		userName = m.Name
+		if len(m.Img.String) > 0 {
+			if IsUrl(m.Img.String) {
+				userImage = m.Img.String
+			} else {
+				userImage = viper.GetString("aws.s3.public_url") + m.Img.String
+			}
+	
+		} else {
+			userImage = ""
+		}
 		userStatus = m.IsActive
 		userPhone = m.Phone
 		userEmail = m.Email
@@ -434,6 +492,16 @@ func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, u
 		userCode = u.UserCode
 		userRole = u.Role
 		userName = u.Name
+		if len(u.Img.String) > 0 {
+			if IsUrl(u.Img.String) {
+				userImage = u.Img.String
+			} else {
+				userImage = viper.GetString("aws.s3.public_url") + u.Img.String
+			}
+	
+		} else {
+			userImage = ""
+		}
 		userStatus = u.IsActive
 		userPhone = u.Phone
 		userEmail = u.Email
@@ -449,6 +517,7 @@ func (c *Contract) AuthLogin(db *pgxpool.Conn, ctx context.Context, ch string, u
 		"user_code":   userCode,
 		"user_role":   userRole,
 		"user_name":   userName,
+		"user_image":  userImage,
 		"user_status": userStatus,
 		"user_phone":  userPhone,
 		"user_email":  userEmail,
@@ -532,4 +601,21 @@ func (c *Contract) sendDataMailWSG(usedFor, subject, to string, dataMail interfa
 	log.Println("Email Sent")
 
 	return err
+}
+
+func (c *Contract) DecodeTokenJWT(token string) (map[string]interface{}, error) {
+	claims := jwt.MapClaims{}
+	_, err := jwt.ParseWithClaims(token, claims, func(tokenTemp *jwt.Token) (interface{}, error) {
+		return []byte(c.Config.GetString("app.key")), nil
+	})
+	if err != nil {
+		return claims, err
+	}
+
+	return claims, nil
+}
+
+func IsUrl(str string) bool {
+	u, err := url.Parse(str)
+	return err == nil && u.Scheme != "" && u.Host != ""
 }

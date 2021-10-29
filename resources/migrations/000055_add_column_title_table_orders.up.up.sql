@@ -1,0 +1,2 @@
+ALTER TABLE orders 
+    ADD COLUMN title VARCHAR(100) NULL;

@@ -43,6 +43,19 @@ func (h *Contract) RegisterAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check via name send token
+	viaEmail := m.Via(req.Email)
+	if viaEmail == "" {
+		h.SendBadRequest(w, "email requests is invalid.")
+		return
+	}
+
+	viaPhone := m.Via(req.Phone)
+	if viaPhone == "" {
+		h.SendBadRequest(w, "phone requests is invalid.")
+		return
+	}
+
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
@@ -55,10 +68,11 @@ func (h *Contract) RegisterAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	member, _ := m.GetMemberByEmail(db, ctx, req.Email)
+	member, _ := m.GetMemberByEmailUsernamePhone(db, ctx, req.Email, req.Username, req.Phone)
 
-	if member.ID != 0 && !member.IsActive {
-		responseMessage = fmt.Sprintf("Account %s has been registered and need activated", member.Email)
+	if member.ID != 0 {
+		h.SendBadRequest(w, "user already exists")
+		return
 	} else {
 		member, err = m.AddMember(tx, context.Background(), model.MemberEnt{
 			Name:     req.Name,
@@ -251,6 +265,7 @@ func (h *Contract) LoginAct(w http.ResponseWriter, r *http.Request) {
 	userPhone := userTokenCredential["user_phone"].(string)
 	userCode := userTokenCredential["user_code"].(string)
 	userName := userTokenCredential["user_name"].(string)
+	userImage  := userTokenCredential["user_image"].(string)
 	userStatus := userTokenCredential["user_status"].(bool)
 	userID, err := strconv.Atoi(fmt.Sprintf("%v", userTokenCredential["user_id"]))
 	if err != nil {
@@ -312,6 +327,7 @@ func (h *Contract) LoginAct(w http.ResponseWriter, r *http.Request) {
 		"user_code":         userCode,
 		"user_role":         userRole,
 		"user_name":         userName,
+		"user_image": 		 userImage,
 		"user_status":       userStatus,
 		"user_phone":        userPhone,
 		"user_email":        userEmail,
@@ -480,8 +496,6 @@ func (h *Contract) ForgotChangePassAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: for now we get username from payload
-	// must get username from the other (ex: jwt token, encrypted username)
 	ctx := context.Background()
 	db, err := h.DB.Acquire(ctx)
 	if err != nil {
@@ -497,7 +511,21 @@ func (h *Contract) ForgotChangePassAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = m.UpdatePassword(tx, ctx, h.GetChannel(r), req.Username, req.Password); err != nil {
+	username := req.Username
+	channel := h.GetChannel(r)
+
+	// Set username from the jwt token
+	if channel == model.ChannelCMS {
+		tokenDecoded, err := m.DecodeTokenJWT(username)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+		username = tokenDecoded["member_code"].(string)
+	}
+
+	if err = m.UpdatePassword(tx, ctx, channel, username, req.Password); err != nil {
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)
 		return
@@ -563,14 +591,15 @@ func (h *Contract) SendTokenAct(w http.ResponseWriter, r *http.Request) {
 	var userID int32
 	var userStatus bool
 	var userEmail, userCode, userPhone, userRole string
-
+	member, _ := m.GetMemberBy(db, ctx, viaName, req.Username)
 	if channel == model.ChannelCustApp {
-		member, _ := m.GetMemberBy(db, ctx, viaName, req.Username)
-		userID = member.ID
-		userEmail = member.Email
-		userCode = member.MemberCode
-		userPhone = member.Phone
-		userStatus = member.IsActive
+		if typeToken != "change-phone" {
+			userID = member.ID
+			userEmail = member.Email
+			userCode = member.MemberCode
+			userPhone = req.Username
+			userStatus = member.IsActive
+		}
 		userRole = "customer"
 	} else {
 		user, _ := m.GetUserBy(db, ctx, viaName, req.Username)
@@ -581,7 +610,13 @@ func (h *Contract) SendTokenAct(w http.ResponseWriter, r *http.Request) {
 		userStatus = user.IsActive
 		userRole = user.Role
 	}
-	if userID == 0 {
+
+	if member.Phone == req.Username && typeToken == "change-phone" {
+		h.SendBadRequest(w, "user already exists.")
+		return
+	}
+
+	if userID == 0 && typeToken != "change-phone" {
 		h.SendBadRequest(w, "user not found.")
 		return
 	}
@@ -620,6 +655,14 @@ func (h *Contract) SendTokenAct(w http.ResponseWriter, r *http.Request) {
 		actType := model.ActChangePass
 		if typeToken == "phone" {
 			actType = model.ActChangePhone
+		}
+
+		if typeToken == "change-phone" {
+			actType = model.ActChangePhone
+		}
+
+		if typeToken == "pass" {
+			actType = model.ActChangePass
 		}
 
 		// Verification token

@@ -71,6 +71,7 @@ func (app Boot) Start(c *cli.Context) error {
 			"X-SIGNATURE",
 			"X-TIMESTAMPT",
 			"X-CHANNEL",
+			"X-PLAYER",
 			"Access-Control-Allow-Headers",
 			"X-Requested-With",
 			"application/json",

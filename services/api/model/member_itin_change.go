@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -19,41 +20,42 @@ type MemberItinChangesEnt struct {
 }
 
 // GetTcIDLeastWorkByID ...
-func (c *Contract) GetTcIDLeastWorkByID(db *pgxpool.Conn, ctx context.Context, id int32) (int32, error) {
+func (c *Contract) GetTcIDLeastWorkByID(db *pgxpool.Conn, ctx context.Context, id int32) (int32, string, string, error) {
 	var idTc, totalItin int32
+	var name, code string
 
 	err := db.QueryRow(ctx, `
 			select 
-				u.id, count(o.member_itin_id) a
+				u.id, count(o.chat_id) a, u.name, u.user_code
 			from users as u
 			left join orders o on o.tc_id = u.id
 			join log_visit_app l on l.user_id = u.id
 			where is_active = true and u.role = 'tc' and u.id not in($1)
 			group by paid_by, u.id
-			order by a asc limit 1`, id).Scan(&idTc, &totalItin)
+			order by a asc limit 1`, id).Scan(&idTc, &totalItin, &name, &code)
 
-	return idTc, err
+	return idTc, name, code, err
 }
 
-func (c *Contract) GetTcIDLeastWork(db *pgxpool.Conn, ctx context.Context) (int32, string, error) {
+func (c *Contract) GetTcIDLeastWork(db *pgxpool.Conn, ctx context.Context) (int32, string, string, error) {
 	var idTc, totalItin int32
-	var name string
+	var name, code string
 
 	startDate := fmt.Sprintf("%v", time.Now().Format("2006-01-02")) + " 00:00:00"
 	endDate := fmt.Sprintf("%v", time.Now().Format("2006-01-02")) + " 23:59:59"
 
 	err := db.QueryRow(ctx, `
 			select 
-				u.id, count(o.member_itin_id) a, u.name
+				u.id, count(o.chat_id) a, u.name, u.user_code
 			from users as u
 			left join orders o on o.tc_id = u.id
 			join log_visit_app l on l.user_id = u.id
 			where is_active = true and u.role = 'tc' and l.role = 'tc' 
 			and l.last_active_date between $1 AND $2
 			group by paid_by, u.id 
-			order by a asc limit 1`, startDate, endDate).Scan(&idTc, &totalItin, &name)
+			order by a asc limit 1`, startDate, endDate).Scan(&idTc, &totalItin, &name, &code)
 
-	return idTc, name, err
+	return idTc, name, code, err
 }
 
 // ChangeTc ...
@@ -98,44 +100,41 @@ func (c *Contract) GetMemberItinIdByCustID(db *pgxpool.Conn, ctx context.Context
 	return arrID, err
 }
 
-// GetMemberItinByTcID ...
-func (c *Contract) GetMemberItinByTcID(db *pgxpool.Conn, ctx context.Context, tcID int32) ([]int32, error) {
-
-	var arrID []int32
-
-	sql := `
-		select 
-			mi.id 
-		from orders as o
-		join member_itins mi on mi.id = o.member_itin_id
-		where o.tc_id = $1 and order_status = 'P'`
-
-	rows, err := db.Query(ctx, sql, tcID)
-	if err != nil {
-		return arrID, err
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		var a int32
-		err = rows.Scan(&a)
-		if err != nil {
-			return arrID, err
-		}
-
-		arrID = append(arrID, a)
-	}
-	return arrID, err
-}
-
 // UpdateTcIdOrder ...
-func (c *Contract) UpdateTcIdOrder(db *pgxpool.Conn, ctx context.Context, tx pgx.Tx, newTcID int32, arrItinID int32) error {
+func (c *Contract) UpdateTcIdOrder(db *pgxpool.Conn, ctx context.Context, tx pgx.Tx, newTcID int32, chatGroupID int32) error {
 
-	sql := `UPDATE orders SET  tc_id=$1 WHERE member_itin_id = $2 and order_status = 'P' `
+	sql := `UPDATE orders SET tc_id = $1 WHERE chat_id = $2 and order_status = $3 `
 
-	stmt, err := tx.Query(ctx, sql, newTcID, arrItinID)
+	stmt, err := tx.Query(ctx, sql, newTcID, chatGroupID, ORDER_STATUS_PENDING)
 
 	defer stmt.Close()
 
 	return err
+}
+
+// GetListChatGroupByTcID ...
+func (c *Contract) GetListChatGroupByTcID(db *pgxpool.Conn, ctx context.Context, tcID int32) ([]ChatGroupEnt, error) {
+
+	var chatGroupList []ChatGroupEnt
+	var memberItinID sql.NullInt32
+
+	sql := `select cg.id, cg.member_itin_id, cg.chat_group_code from orders o join chat_groups cg on cg.id = o.chat_id where o.tc_id = $1 and o.order_status = $2`
+
+	rows, err := db.Query(ctx, sql, tcID, ORDER_STATUS_PENDING)
+	if err != nil {
+		return chatGroupList, err
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		var c ChatGroupEnt
+		err = rows.Scan(&c.ID, &memberItinID, &c.ChatGroupCode)
+		if err != nil {
+			return chatGroupList, err
+		}
+
+		c.MemberItin.ID = memberItinID.Int32
+		chatGroupList = append(chatGroupList, c)
+	}
+	return chatGroupList, err
 }

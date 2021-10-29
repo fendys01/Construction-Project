@@ -165,8 +165,6 @@ func (c *Contract) GetDetailTcByCode(db *pgxpool.Conn, ctx context.Context, code
 			from users as u
 			left join orders o on o.tc_id = u.id
 			left join log_visit_app l on l.user_id = u.id
-			left join member_itins mi on mi.id = o.member_itin_id
-			left join members m on m.id = mi.created_by
 			where l.role = 'tc' and user_code = $1
 			group by paid_by, u.id, l.id`
 

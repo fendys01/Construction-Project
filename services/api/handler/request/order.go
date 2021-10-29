@@ -1,14 +1,31 @@
 package request
 
+import (
+	"panorama/services/api/model"
+)
+
 type OrderReq struct {
-	MemberItinCode    string                   `json:"member_itin_code" validate:"required"`
-	PaidByCode        string                   `json:"paid_by_code" validate:"required"`
-	TotalPrice        int                      `json:"total_price" validate:"required"`
-	AdditionalDetails []map[string]interface{} `json:"additional_details"`
+	Title         string `json:"title" validate:"required"`
+	Description   string `json:"description" validate:"required"`
+	PaidByCode    string `json:"paid_by_code" validate:"required"`
+	ChatGroupCode string `json:"chat_group_code" validate:"required"`
+	TotalPrice    int    `json:"total_price" validate:"required"`
+	TotalPricePPN int    `json:"total_price_ppn" validate:"required"`
+	OrderType     string `json:"order_type" validate:"required"`
+	Details       string `json:"additional_details" validate:"required"`
+}
+
+type OrderReqUpdate struct {
+	Title      string `json:"title"`
+	PaidByCode string `json:"paid_by_code" `
+	TotalPrice int    `json:"total_price" `
+	OrderType  string `json:"order_type" `
+	Details    string `json:"additional_details"`
 }
 
 type OrderPaymentReq struct {
-	Amount int `json:"amount" validate:"required"`
+	Amount    int    `json:"amount" validate:"required"`
+	OrderCode string `json:"order_code" validate:"required"`
 }
 
 // VANumber : bank virtual account number
@@ -76,4 +93,26 @@ type OrderPaymentMidtransNotification struct {
 	Refunds              []RefundMidtrans   `json:"refunds"`
 	ChannelResponseCode  string             `json:"channel_response_code"`
 	ChannelStatusMessage string             `json:"channel_status_message"`
+}
+
+// Transform OrderReqUpdate to orderEnt
+func (u OrderReqUpdate) Transform(m model.OrderEnt) model.OrderEnt {
+
+	if len(u.Title) > 0 {
+		m.Title = u.Title
+	}
+
+	if u.TotalPrice > 0 {
+		m.TotalPrice = int64(u.TotalPrice)
+	}
+
+	if len(u.OrderType) > 0 {
+		m.OrderType = u.OrderType
+	}
+
+	if len(u.Details) > 0 {
+		m.Details = u.Details
+	}
+
+	return m
 }

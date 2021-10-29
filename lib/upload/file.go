@@ -1,14 +1,17 @@
 package upload
 
 import (
+	"fmt"
 	"mime/multipart"
 	"net/http"
+	"panorama/lib/utils"
 	"strings"
 )
 
 const (
 	// MB size constant
-	MB = 1 << 20
+	MB             = 1 << 20
+	ContentTypePDF = "application/pdf"
 )
 
 // Sizer ...
@@ -30,9 +33,7 @@ type FileInfo struct {
 }
 
 // MultipartHandler handle multipart form data file upload
-func (fu Info) MultipartHandler(w http.ResponseWriter,
-	r *http.Request, key string, AllowedExt []string,
-) (multipart.File, FileInfo, error) {
+func (fu Info) MultipartHandler(w http.ResponseWriter, r *http.Request, key string, AllowedExt []string) (multipart.File, FileInfo, error) {
 	if err := r.ParseMultipartForm(fu.MaxSize * MB); err != nil {
 		return nil, FileInfo{}, err
 	}
@@ -45,6 +46,7 @@ func (fu Info) MultipartHandler(w http.ResponseWriter,
 	if err != nil {
 		return nil, FileInfo{}, err
 	}
+	contentTypeFileHeader := multipartFileHeader.Header.Get("Content-Type")
 
 	// Create a buffer to store the header of the file in
 	// And copy the headers into the FileHeader buffer
@@ -60,13 +62,22 @@ func (fu Info) MultipartHandler(w http.ResponseWriter,
 
 	defer file.Close()
 
+	// Adjust mime type ext
 	mime := http.DetectContentType(fileHeader)
-	ext := strings.Split(mime, "/")
+	if contentTypeFileHeader == ContentTypePDF {
+		mime = ContentTypePDF
+	}
+	ext := strings.Split(mime, "/")[1]
+
+	// Check content type allowed
+	if !utils.StringContainsArray(AllowedExt, ext) {
+		return nil, FileInfo{}, fmt.Errorf("%s", "Content type is not allowed.")
+	}
 
 	return file, FileInfo{
 		Filename: multipartFileHeader.Filename,
 		FileSize: file.(Sizer).Size(),
 		FileMime: mime,
-		FileExt:  ext[1],
+		FileExt:  ext,
 	}, nil
 }

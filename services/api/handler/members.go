@@ -567,3 +567,86 @@ func (h *Contract) DeleteMember(w http.ResponseWriter, r *http.Request) {
 
 	h.SendSuccess(w, h.EmptyJSONArr(), nil)
 }
+
+// Force Deleted member
+func (h *Contract) ForceDeleteMember(w http.ResponseWriter, r *http.Request) {
+	var err error
+	code := chi.URLParam(r, "code")
+	if len(code) == 0 {
+		h.SendBadRequest(w, "invalid code")
+		return
+	}
+
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	m := model.Contract{App: h.App}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	data, _ := m.GetMemberDelByCode(db, ctx, code)
+	if data.ID == 0 {
+		h.SendNotfound(w, "Member not found.")
+		tx.Rollback(ctx)
+		return
+	}
+	data.IsActive = false
+
+	// force Deleted Member
+	err = m.ForceDeleteMember(tx, ctx, code, data)
+	if err != nil {
+		h.SendBadRequest(w, "Delete user failed")
+		return
+	}
+
+	// Activity user logging in process
+	log := model.LogActivityUserEnt{
+		UserID:    int64(data.ID),
+		Role:      h.GetUserRole(r.Context()),
+		Title:     fmt.Sprintf("Delete %s", code),
+		Activity:  fmt.Sprintf("Delete member %s", code),
+		EventType: r.Method,
+	}
+	_, err = m.AddLogActivity(tx, ctx, log)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To User (Admin)
+	players, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "admin")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContent := model.NotificationContent{
+		CustomerName: data.Name,
+		Subject:      model.NOTIF_SUBJ_CUSTOMER_BANNED,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, players, notifContent)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Commit transaction
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+}

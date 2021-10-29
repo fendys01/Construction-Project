@@ -2,94 +2,50 @@ package response
 
 import (
 	"panorama/services/api/model"
-	"reflect"
-	"strconv"
+	"strings"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 // ItinOrderMember Response Detail
 
 type DetailOrderMemberResponse struct {
-	MemberItinCode         string                   `json:"itin_code"`
-	MemberCode             string                   `json:"member_code"`
-	TcName                 string                   `json:"tc_name"`
-	MemberName             string                   `json:"member_name"`
-	OrderCode              string                   `json:"order_code"`
-	Title                  string                   `json:"title"`
-	DayPeriod              string                   `json:"day_period"`
-	PaidBy                 int32                    `json:"paid_by"`
-	TotalPrice             int64                    `json:"total_price"`
-	CreatedDate            time.Time                `json:"created_date"`
-	OrderType              string                   `json:"order_type"`
-	PaymentType            string                   `json:"payment_type"`
-	PaymentAmount          int64                    `json:"payment_amount"`
-	PaymentStatus          string                   `json:"payment_status"`
-	PaymentExpiredDate     time.Time                `json:"payment_expired_date"`
-	PaymentExpiredDateText string                   `json:"payment_expired_date_text"`
-	PaymentURL             string                   `json:"payment_url"`
-	PaymentPayloads        map[string]interface{}   `json:"payment_payloads"`
-	Details                []map[string]interface{} `json:"detail"`
-	DetailsOrders          []map[string]interface{} `json:"detail_orders"`
+	MemberCode  string    `json:"member_code"`
+	TcName      string    `json:"tc_name"`
+	MemberName  string    `json:"member_name"`
+	OrderCode   string    `json:"order_code"`
+	Title       string    `json:"title"`
+	Details     string    `json:"detail_pdf"`
+	PaidBy      int32     `json:"paid_by"`
+	TotalPrice  int64     `json:"total_price"`
+	OrderType   string    `json:"order_type"`
+	CreatedDate time.Time `json:"created_date"`
 }
 
 // Transform from order model to detail order member response
 func (r DetailOrderMemberResponse) Transform(i model.OrderEnt) DetailOrderMemberResponse {
-	r.MemberItinCode = i.MemberItin.ItinCode
 	r.MemberCode = i.MemberEnt.MemberCode
 	r.TcName = i.UserEnt.Name
 	r.MemberName = i.MemberEnt.Name
 	r.OrderCode = i.OrderCode
-	r.Title = i.MemberItin.Title
-	r.DayPeriod = strconv.Itoa(int(i.DayPeriod)) + "D" + strconv.Itoa(int(i.DayPeriod-1)) + "N"
+	r.Title = i.Title
+
+	if len(strings.TrimSpace(i.Details)) > 0 {
+		if IsUrl(i.Details) {
+			r.Details = i.Details
+		} else {
+			r.Details = viper.GetString("aws.s3.public_url") + i.Details
+		}
+
+	} else {
+		r.Details = ""
+	}
+
 	r.PaidBy = i.PaidBy
 	r.TotalPrice = i.TotalPrice
-	r.CreatedDate = i.CreatedDate
 	r.OrderType = i.OrderType
-	r.PaymentType = i.OrderPayment.PaymentType
-	r.PaymentAmount = i.OrderPayment.Amount
-	r.PaymentStatus = i.OrderPayment.PaymentStatus
-	r.PaymentURL = i.OrderPayment.PaymentURL
-	r.PaymentPayloads = i.OrderPayment.Payloads
-	r.Details = i.MemberItin.Details
-	r.PaymentExpiredDate = i.OrderPayment.ExpiredDate
-	expiredDateText := i.OrderPayment.ExpiredDate.String()
-	if i.OrderPayment.ExpiredDate.IsZero() {
-		expiredDateText = ""
-	}
-	r.PaymentExpiredDateText = expiredDateText
-
-	for _, v := range i.MemberItin.Details {
-
-		if reflect.ValueOf(v["flight"]).IsValid() {
-			if len(r.DetailsOrders) <= 0 {
-				r.DetailsOrders = append(r.DetailsOrders, v)
-			} else {
-				r.DetailsOrders[0]["flight"] = v
-			}
-
-		} else if reflect.ValueOf(v["hotel"]).IsValid() {
-			if len(r.DetailsOrders) <= 0 {
-				r.DetailsOrders = append(r.DetailsOrders, v)
-			} else {
-				r.DetailsOrders[0]["hotel"] = v["hotel"]
-			}
-
-		} else if reflect.ValueOf(v["other"]).IsValid() {
-			if len(r.DetailsOrders) <= 0 {
-				r.DetailsOrders = append(r.DetailsOrders, v)
-			} else {
-				r.DetailsOrders[0]["other"] = v["other"]
-			}
-
-		} else if reflect.ValueOf(v["others"]).IsValid() {
-			if len(r.DetailsOrders) <= 0 {
-				r.DetailsOrders = append(r.DetailsOrders, v)
-			} else {
-				r.DetailsOrders[0]["others"] = v["others"]
-			}
-
-		}
-	}
+	r.CreatedDate = i.CreatedDate
 
 	return r
 
@@ -97,48 +53,58 @@ func (r DetailOrderMemberResponse) Transform(i model.OrderEnt) DetailOrderMember
 
 // ItinOrderMember Response List
 type ItinOrderMemberResponse struct {
-	Title                  string                 `json:"title"`
-	MemberName             string                 `json:"customer_name"`
-	OrderCode              string                 `json:"order_code"`
-	OrderStatus            string                 `json:"order_status"`
-	OrderType              string                 `json:"order_type"`
-	TotalPrice             int64                  `json:"total_price"`
-	CreatedDate            string                 `json:"created_date"`
-	PaymentType            string                 `json:"payment_type"`
-	PaymentAmount          int64                  `json:"payment_amount"`
-	PaymentStatus          string                 `json:"payment_status"`
-	PaymentExpiredDate     time.Time              `json:"payment_expired_date"`
-	PaymentExpiredDateText string                 `json:"payment_expired_date_text"`
-	PaymentURL             string                 `json:"payment_url"`
-	PaymentPayloads        map[string]interface{} `json:"payment_payloads"`
+	Title         string `json:"title"`
+	MemberName    string `json:"customer_name"`
+	Details       string `json:"detail_pdf"`
+	OrderCode     string `json:"order_code"`
+	OrderType     string `json:"order_type"`
+	Description   string `josn:"description"`
+	TotalPrice    int64  `json:"total_price"`
+	TotalPricePpn int64  `json:"total_price_ppn"`
+	CreatedDate   string `json:"created_date"`
+	MemberImage   string `json:"member_image"`
+	PaymentStatus string `json:"payment_status"`
 }
 
 // Transform from order model to itin order member response
 func (r ItinOrderMemberResponse) Transform(i model.OrderEnt) ItinOrderMemberResponse {
 	time := i.CreatedDate
-	timeday := time.Format("January 02, 2006")
-
-	r.Title = i.MemberItin.Title
+	timeday := time.Format("Jan 02, 2006")
+	r.Title = i.Title
 	r.MemberName = i.MemberEnt.Name
-	r.OrderCode = i.OrderCode
-	r.CreatedDate = timeday
-	r.OrderStatus = i.OrderStatus
-	r.OrderType = i.OrderType
-	r.TotalPrice = i.TotalPrice
-	r.PaymentType = i.OrderPayment.PaymentType
-	r.PaymentAmount = i.OrderPayment.Amount
-	r.PaymentStatus = i.OrderPayment.PaymentStatus
-	r.PaymentURL = i.OrderPayment.PaymentURL
-	r.PaymentPayloads = i.OrderPayment.Payloads
-	r.PaymentExpiredDate = i.OrderPayment.ExpiredDate
-	expiredDateText := i.OrderPayment.ExpiredDate.String()
-	if i.OrderPayment.ExpiredDate.IsZero() {
-		expiredDateText = ""
+	r.Description = i.Description
+
+	if len(strings.TrimSpace(i.Details)) > 0 {
+		if IsUrl(i.Details) {
+			r.Details = i.Details
+		} else {
+			r.Details = viper.GetString("aws.s3.public_url") + i.Details
+		}
+
+	} else {
+		r.Details = ""
 	}
-	r.PaymentExpiredDateText = expiredDateText
+
+	r.OrderCode = i.OrderCode
+	r.OrderType = i.OrderType
+	r.Description = i.Description
+	r.CreatedDate = timeday
+	r.TotalPrice = i.TotalPrice
+	r.TotalPricePpn = i.TotalPricePpn
+
+	var memberImage string
+	if len(i.MemberEnt.Img.String) > 0 {
+		if IsUrl(i.MemberEnt.Img.String) {
+			memberImage = i.MemberEnt.Img.String
+		} else {
+			memberImage = viper.GetString("aws.s3.public_url") + i.MemberEnt.Img.String
+		}
+
+	}
+	r.MemberImage = memberImage
+	r.PaymentStatus = i.OrderPayment.PaymentStatus
 
 	return r
-
 }
 
 // OrderPayment Response

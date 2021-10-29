@@ -5,6 +5,7 @@ import (
 	"panorama/lib/utils"
 	"panorama/services/api/model"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -49,7 +50,7 @@ func (r NotifResponse) Transform(m model.NotificationEnt) NotifResponse {
 	r.TimeElapsed = utils.TimeElapsed(m.CreatedDate)
 
 	var userImg string
-	if len(m.User.Img.String) > 0 {
+	if len(strings.TrimSpace(m.User.Img.String)) > 0 {
 		if IsUrl(m.User.Img.String) {
 			userImg = m.User.Img.String
 		} else {

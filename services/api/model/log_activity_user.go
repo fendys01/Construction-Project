@@ -27,6 +27,7 @@ type ActiveClientConsultan struct {
 	TcReplacementStatus string
 	ItinDate            time.Time
 	TcReplacementDate   sql.NullTime
+	ItinCode            string
 }
 
 // GetListLogActivity ...
@@ -66,20 +67,37 @@ func (c *Contract) GetListLogActivity(db *pgxpool.Conn, ctx context.Context, rol
 }
 
 // GetListLogActivity ...
-func (c *Contract) GetActiveClient(db *pgxpool.Conn, ctx context.Context, id int32) ([]ActiveClientConsultan, error) {
+func (c *Contract) GetActiveClient(db *pgxpool.Conn, ctx context.Context, tcID int32) ([]ActiveClientConsultan, error) {
 	list := []ActiveClientConsultan{}
 
 	sql := `
 		select 
-			m.name, mi.title, mi.created_date, 
-			a.created_date 
-		from member_itins as mi
-		join orders o on o.member_itin_id = mi.id
-		join members m on m.id = mi.created_by
-		left join (select * from member_itin_changes as mic where mic.changed_user_id = $1 ) a on a.member_itin_id = mi.id
-		where o.tc_id = $2 `
+		m.name, 
+		mi.itin_code,
+		mi.title, 
+		mi.created_date, 
+		a.created_date 
+	from member_itins as mi
+	join chat_groups cg on cg.member_itin_id = mi.id
+	join orders o on o.chat_id = cg.id 
+	join members m on m.id = mi.created_by
+	left join (
+		select 
+			mic.member_itin_id, 
+			mic.created_date
+		from member_itin_changes as mic 
+		where mic.changed_user_id = $1
+	) a on a.member_itin_id = mi.id
+	where o.tc_id = $2
+	group by 
+		m.name, 
+		mi.itin_code,
+		mi.title, 
+		mi.created_date, 
+		a.created_date 
+	`
 
-	rows, err := db.Query(ctx, sql, id, id)
+	rows, err := db.Query(ctx, sql, tcID, tcID)
 	if err != nil {
 		return list, err
 	}
@@ -87,7 +105,7 @@ func (c *Contract) GetActiveClient(db *pgxpool.Conn, ctx context.Context, id int
 	defer rows.Close()
 	for rows.Next() {
 		var ac ActiveClientConsultan
-		err = rows.Scan(&ac.Name, &ac.Title, &ac.ItinDate, &ac.TcReplacementDate)
+		err = rows.Scan(&ac.Name, &ac.ItinCode, &ac.Title, &ac.ItinDate, &ac.TcReplacementDate)
 		if err != nil {
 			return list, err
 		}

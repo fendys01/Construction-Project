@@ -50,7 +50,7 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 			r.Put("/invite-tc", h.InviteTcToGroupChat)
 			r.Post("/message", h.ChatMessage)
 			r.Get("/{code}", h.GetHistoryChatByCode)
-			r.Put("/{code}/leave-seasion", h.LeaveSesonChatAct)
+			r.Put("/{code}/leave-session", h.LeaveSessionChatAct)
 			r.Put("/is-read", h.UpdateIsReadMessages)
 		})
 
@@ -90,6 +90,7 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 			r.Put("/pass/{code}", h.UpdateMemberPassAct)
 			r.Put("/phone/{code}", h.UpdateMemberPhoneAct)
 			r.Delete("/{code}", h.DeleteMember)
+			r.Delete("/{code}/force-delete", h.ForceDeleteMember)
 		})
 
 		r.Route("/orders", func(r chi.Router) {
@@ -97,6 +98,7 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 			r.Get("/{code}/detail", h.GetDetailItinOrderMember)
 			r.Post("/", h.AddOrderAct)
 			r.Put("/{code}", h.UpdateOrderAct)
+			r.Post("/payment", h.PostPaymentAct)
 		})
 
 		// create push notification
@@ -104,6 +106,9 @@ func RegisterSubsRoute(r chi.Router, app *bootstrap.App) {
 			r.Get("/", h.GetListNotifAct)
 			r.Get("/{code}", h.GetNotifAct)
 			r.Get("/counter", h.GetCounterNotifAct)
+			r.Put("/{code}/is-read", h.UpdateIsReadNotification)
+			r.Delete("/{code}", h.DeleteNotificationAct)
+			r.Delete("/", h.DeleteAllNotificationAct)
 		})
 
 		r.Route("/dashboard", func(r chi.Router) {

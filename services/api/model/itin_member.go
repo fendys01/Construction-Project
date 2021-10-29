@@ -31,7 +31,6 @@ type MemberItinEnt struct {
 	MemberEnt     MemberEnt
 	GroupMembers  []map[string]interface{}
 	ChatGroupCode string
-	OrderCode     string
 }
 
 // GetMemberItinID get member itinerary by itenerary code
@@ -54,11 +53,10 @@ func (c *Contract) GetMemberItinByID(db *pgxpool.Conn, ctx context.Context, id i
 // GetMemberItinByCode
 func (c *Contract) GetMemberItinByCode(db *pgxpool.Conn, ctx context.Context, code string) (MemberItinEnt, error) {
 	var m MemberItinEnt
-	var dest, orderCode sql.NullString
-	sql := `select mi.*, o.order_code
-			from member_itins mi
-			left join orders o on o.member_itin_id = mi.id where mi.itin_code=$1 limit 1`
-	err := db.QueryRow(ctx, sql, code).Scan(&m.ID, &m.ItinCode, &m.Title, &m.CreatedBy, &m.EstPrice, &m.StartDate, &m.EndDate, &m.Details, &m.CreatedDate, &m.UpdatedDate, &m.DeletedDate, &dest, &m.Img, &orderCode)
+	var dest sql.NullString
+
+	sql := `select * from member_itins where itin_code = $1 limit 1`
+	err := db.QueryRow(ctx, sql, code).Scan(&m.ID, &m.ItinCode, &m.Title, &m.CreatedBy, &m.EstPrice, &m.StartDate, &m.EndDate, &m.Details, &m.CreatedDate, &m.UpdatedDate, &m.DeletedDate, &dest, &m.Img)
 	if err != nil {
 		return m, err
 	}
@@ -71,13 +69,12 @@ func (c *Contract) GetMemberItinByCode(db *pgxpool.Conn, ctx context.Context, co
 		m.DayPeriod = int32(strings.Count(string(c), "]"))
 	}
 	m.Destination = dest.String
-	m.OrderCode = orderCode.String
 
 	return m, err
 }
 
 // AddMemberItin add new itinerary by members
-func (c *Contract) AddMemberItin(tx pgx.Tx, ctx context.Context, m MemberItinEnt, orderType string) (MemberItinEnt, error) {
+func (c *Contract) AddMemberItin(tx pgx.Tx, ctx context.Context, m MemberItinEnt) (MemberItinEnt, error) {
 	var lastInsID int32
 	var paramQuery []interface{}
 
@@ -85,11 +82,7 @@ func (c *Contract) AddMemberItin(tx pgx.Tx, ctx context.Context, m MemberItinEnt
 
 	sql := `insert into member_itins(itin_code, title, destination, created_by, est_price, start_date, end_date, details, created_date, img) values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`
 
-	if orderType == ORDER_TYPE_CUSTOM {
-		paramQuery = append(paramQuery, m.ItinCode, m.Title, nil, m.CreatedBy, m.EstPrice, nil, nil, m.Details, timeStamp, m.Img)
-	} else {
-		paramQuery = append(paramQuery, m.ItinCode, m.Title, m.Destination, m.CreatedBy, m.EstPrice, m.StartDate, m.EndDate, m.Details, timeStamp, m.Img)
-	}
+	paramQuery = append(paramQuery, m.ItinCode, m.Title, m.Destination, m.CreatedBy, m.EstPrice, m.StartDate, m.EndDate, m.Details, timeStamp, m.Img)
 
 	err := tx.QueryRow(ctx, sql, paramQuery...).Scan(&lastInsID)
 
@@ -342,7 +335,7 @@ func (c *Contract) UpdateMemberItin(tx pgx.Tx, ctx context.Context, m MemberItin
 // GetMemberItinWithGroupsByCode
 func (c *Contract) GetMemberItinWithGroupsByCode(db *pgxpool.Conn, ctx context.Context, code string) (MemberItinEnt, error) {
 	var m MemberItinEnt
-	var dest, cgCode, orderCode sql.NullString
+	var dest, cgCode sql.NullString
 	var startDate, endDate sql.NullTime
 
 	query := `select
@@ -361,12 +354,10 @@ func (c *Contract) GetMemberItinWithGroupsByCode(db *pgxpool.Conn, ctx context.C
 		m.name member_name,
 		m.member_code,
 		cg.chat_group_code,
-		o.order_code,
 		mg.groups_itin_member
 	from member_itins mi 
 	join members m on m.id = mi.created_by and m.deleted_date is null
 	left join chat_groups cg on cg.member_itin_id = mi.id
-	left join orders o on o.member_itin_id = mi.id
 	left join (
 		select
 			groups_itin.itin_code,
@@ -431,9 +422,9 @@ func (c *Contract) GetMemberItinWithGroupsByCode(db *pgxpool.Conn, ctx context.C
 		) groups_itin
 		group by groups_itin.itin_code
 	) mg on mg.itin_code = mi.itin_code
-	where mi.itin_code=$1 limit 1`
+	where mi.itin_code = $1 limit 1`
 
-	err := db.QueryRow(ctx, query, code).Scan(&m.ID, &m.ItinCode, &m.Title, &dest, &m.EstPrice, &startDate, &endDate, &m.Img, &m.Details, &m.CreatedDate, &m.UpdatedDate, &m.DeletedDate, &m.MemberEnt.Name, &m.MemberEnt.MemberCode, &cgCode, &orderCode, &m.GroupMembers)
+	err := db.QueryRow(ctx, query, code).Scan(&m.ID, &m.ItinCode, &m.Title, &dest, &m.EstPrice, &startDate, &endDate, &m.Img, &m.Details, &m.CreatedDate, &m.UpdatedDate, &m.DeletedDate, &m.MemberEnt.Name, &m.MemberEnt.MemberCode, &cgCode, &m.GroupMembers)
 	if err != nil {
 		return m, err
 	}
@@ -449,7 +440,6 @@ func (c *Contract) GetMemberItinWithGroupsByCode(db *pgxpool.Conn, ctx context.C
 
 	m.Destination = dest.String
 	m.ChatGroupCode = cgCode.String
-	m.OrderCode = orderCode.String
 	m.StartDate = startDate.Time
 	m.EndDate = endDate.Time
 

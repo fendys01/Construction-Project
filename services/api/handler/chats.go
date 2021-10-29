@@ -264,7 +264,7 @@ func (h *Contract) InviteTcToGroupChat(w http.ResponseWriter, r *http.Request) {
 	m := model.Contract{App: h.App}
 
 	// find tc id yang plg sedikit orderannya
-	idTc, name, err := m.GetTcIDLeastWork(db, ctx)
+	idTc, name, _, err := m.GetTcIDLeastWork(db, ctx)
 	if err == sql.ErrNoRows {
 		h.SendBadRequest(w, "Tidak ada tc yang bisa di assign")
 		return
@@ -341,10 +341,27 @@ func (h *Contract) ChatMessage(w http.ResponseWriter, r *http.Request) {
 
 	m := model.Contract{App: h.App}
 
-	// get user id for message user id
+	// Get chat group exist
+	chatGroup, err := m.GetGroupChatsCreatedBy(db, ctx, req.ChatGroupCode)
+	if chatGroup.ID <= 0 {
+		h.SendNotfound(w, fmt.Sprintf("Group code %s not found.", req.ChatGroupCode))
+		return
+	}
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// Get user id for message user id
 	if h.GetUserRole(r.Context()) == "customer" {
 		member, err := m.GetMemberBy(db, ctx, "member_code", h.GetUserCode(r.Context()))
-		if member.ID == 0 {
+		if member.ID <= 0 {
 			h.SendNotfound(w, fmt.Sprintf("Customer %s not found.", h.GetUserCode(r.Context())))
 			return
 		}
@@ -357,6 +374,60 @@ func (h *Contract) ChatMessage(w http.ResponseWriter, r *http.Request) {
 		name = member.Name
 		code = member.MemberCode
 
+		// Assign randomize new TC when status group false
+		if !chatGroup.Status {
+			// Find New TC randomize
+			tcNewID, _, tcNewCode, err := m.GetTcIDLeastWork(db, ctx)
+			if err == sql.ErrNoRows {
+				h.SendBadRequest(w, "Tidak ada tc yang bisa di assign")
+				return
+			}
+			if err != nil {
+				h.SendBadRequest(w, err.Error())
+				return
+			}
+
+			// Edit New TC chat group
+			err = m.UpdateChatGroupStatusAndTC(tx, ctx, tcNewID, true, req.ChatGroupCode)
+			if err != nil {
+				h.SendBadRequest(w, err.Error())
+				tx.Rollback(ctx)
+				return
+			}
+
+			// Activity user new TC
+			logtc := model.LogActivityUserEnt{
+				UserID:    int64(tcNewID),
+				Role:      "tc",
+				Title:     "Assigned to a chat room",
+				Activity:  "Client " + chatGroup.Member.Name,
+				EventType: r.Method,
+			}
+			_, err = m.AddLogActivity(tx, ctx, logtc)
+			if err != nil {
+				h.SendBadRequest(w, err.Error())
+				tx.Rollback(ctx)
+				return
+			}
+
+			// Send Notifications to new TC assigned
+			players, err := m.GetListPlayerByUserCodeAndRole(db, ctx, tcNewCode, "tc")
+			if err != nil {
+				h.SendBadRequest(w, err.Error())
+				tx.Rollback(ctx)
+				return
+			}
+			notifContent := model.NotificationContent{
+				Subject:  model.NOTIF_SUBJ_CHAT_ROOM_ASSIGNED,
+				RoomName: chatGroup.Name,
+			}
+			_, err = m.SendNotifications(tx, db, ctx, players, notifContent)
+			if err != nil {
+				h.SendBadRequest(w, psql.ParseErr(err))
+				tx.Rollback(ctx)
+				return
+			}
+		}
 	} else if h.GetUserRole(r.Context()) == "tc" {
 		user, err := m.GetUserByCode(db, ctx, h.GetUserCode(r.Context()))
 		if user.ID == 0 {
@@ -373,26 +444,9 @@ func (h *Contract) ChatMessage(w http.ResponseWriter, r *http.Request) {
 		code = user.UserCode
 	}
 
-	// get chat group id
-	groupID, err := m.GetIDGroupChatByCode(db, ctx, req.ChatGroupCode)
-	if groupID == 0 {
-		h.SendNotfound(w, fmt.Sprintf("Group code %s not found.", req.ChatGroupCode))
-		return
-	}
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		return
-	}
-
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		h.SendBadRequest(w, err.Error())
-		return
-	}
-
-	// insert message chat
+	// Insert message chat
 	cm, err := m.CreateChatMessage(tx, ctx, model.ChatMessagesEnt{
-		ChatGroupID: groupID,
+		ChatGroupID: chatGroup.ID,
 		UserID:      idUser,
 		Role:        role,
 		Message:     req.Message,
@@ -429,13 +483,16 @@ func (h *Contract) GetChatListAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	param := map[string]interface{}{
-		"keyword":   "",
-		"page":      1,
-		"limit":     10,
-		"offset":    0,
-		"sort":      "desc",
-		"order":     "cg.created_date",
-		"is_paging": "false",
+		"keyword":     "",
+		"page":        1,
+		"limit":       10,
+		"offset":      0,
+		"sort":        "desc",
+		"order":       "cg.created_date",
+		"is_paging":   "false",
+		"tc_code":     "",
+		"member_code": "",
+		"chat_status": "",
 	}
 
 	if sort, ok := r.URL.Query()["sort"]; ok && len(sort[0]) > 0 && strings.ToLower(sort[0]) == "asc" {
@@ -459,6 +516,14 @@ func (h *Contract) GetChatListAct(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if tcCode, ok := r.URL.Query()["tc_code"]; ok && len(tcCode[0]) > 0 {
+		param["tc_code"] = tcCode[0]
+	}
+
+	if chat, ok := r.URL.Query()["chat_status"]; ok && len(chat[0]) > 0 {
+		param["chat_status"] = chat[0]
+	}
+
 	if c, ok := r.URL.Query()["is_paging"]; ok && c[0] == "true" {
 		param["is_paging"] = true
 		param["offset"] = (param["page"].(int) - 1) * param["limit"].(int)
@@ -480,9 +545,6 @@ func (h *Contract) GetChatListAct(w http.ResponseWriter, r *http.Request) {
 	if role == "customer" {
 		param["tc_code"] = ""
 		param["member_code"] = userCode
-	} else if role == "tc" {
-		param["member_code"] = ""
-		param["tc_code"] = userCode
 	}
 
 	m := model.Contract{App: h.App}
@@ -593,15 +655,20 @@ func (h *Contract) GetHistoryChatByCode(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	order, err := m.GetListHistoryOrdByChatCode(db, ctx, code)
+	if err != nil && len(order) <= 0 {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
 	// get list user in group chat
 	listUser, err := m.GetListUserGroupChat(db, ctx, strconv.Itoa(int(chatList.ID)))
 	if err != nil {
-		fmt.Println("err")
-
 		h.SendBadRequest(w, err.Error())
 		return
 	}
 	chatList.ListUser = listUser
+	chatList.OrderHistory = order
 
 	if chatList.ID > 0 {
 
@@ -642,8 +709,14 @@ func (h *Contract) GetHistoryChatByCode(w http.ResponseWriter, r *http.Request) 
 	h.SendSuccess(w, res, param)
 }
 
-// Leave Season - Update Status to False
-func (h *Contract) LeaveSesonChatAct(w http.ResponseWriter, r *http.Request) {
+// Leave Session - Update Status to False
+func (h *Contract) LeaveSessionChatAct(w http.ResponseWriter, r *http.Request) {
+	role := h.GetUserRole(r.Context())
+	if role != "tc" {
+		h.SendUnAuthorizedData(w)
+		return
+	}
+
 	var err error
 	code := chi.URLParam(r, "code")
 	if len(code) == 0 {
@@ -666,7 +739,8 @@ func (h *Contract) LeaveSesonChatAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := m.GetStatusLeaveSeason(db, ctx, code)
+	// Get existing cat group
+	chatGroup, err := m.GetGroupChatsCreatedBy(db, ctx, code)
 	if err == sql.ErrNoRows {
 		h.SendNotfound(w, err.Error())
 		return
@@ -676,23 +750,23 @@ func (h *Contract) LeaveSesonChatAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// edit status to false
-	data.Status = false
-	err = m.UpdateStatus(tx, ctx, code, data)
+	// Find Old TC
+	tcLeave, _ := m.GetUserByCode(db, ctx, h.GetUserCode(r.Context()))
+
+	// Edit New TC chat group
+	err = m.UpdateChatGroupStatusAndTC(tx, ctx, 0, false, code)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)
 		return
 	}
 
-	tc, _ := m.GetUserByCode(db, ctx, h.GetUserCode(r.Context()))
-
-	// Activity user
+	// Activity user old TC
 	log := model.LogActivityUserEnt{
-		UserID:    int64(tc.ID),
+		UserID:    int64(tcLeave.ID),
 		Role:      h.GetUserRole(r.Context()),
 		Title:     "TC has leaved chat room",
-		Activity:  "Chat Room " + data.Name,
+		Activity:  "Chat Room " + chatGroup.Name,
 		EventType: r.Method,
 	}
 	_, err = m.AddLogActivity(tx, ctx, log)
@@ -710,7 +784,16 @@ func (h *Contract) LeaveSesonChatAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+	response := map[string]interface{}{
+		"chat_group_code":   code,
+		"chat_group_name":   chatGroup.Name,
+		"chat_group_status": chatGroup.Status,
+		"member_name":       chatGroup.Member.Name,
+		"tc_code":           tcLeave.UserCode,
+		"tc_name":           tcLeave.Name,
+	}
+
+	h.SendSuccess(w, response, nil)
 }
 
 // UpdateIsReadMessages ...

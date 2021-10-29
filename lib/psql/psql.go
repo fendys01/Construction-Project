@@ -31,7 +31,9 @@ func ParseErr(err error) string {
 		if pqe.Code == "23505" {
 			m := strings.ReplaceAll(pqe.Detail, "(", "")
 			m = strings.ReplaceAll(m, ")", "")
-			m = strings.ReplaceAll(m, "=", " = ")
+			m = strings.ReplaceAll(m, "=", " ")
+			m = strings.ReplaceAll(m, "Key", "")
+			m = strings.ReplaceAll(m, "=","")
 			return m
 		}
 	}

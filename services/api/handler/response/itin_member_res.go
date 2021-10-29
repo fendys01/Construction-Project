@@ -3,6 +3,7 @@ package response
 import (
 	"panorama/services/api/model"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -12,7 +13,6 @@ import (
 type ItinMemberResponse struct {
 	ItinCode      string                   `json:"itin_code"`
 	MemberCode    string                   `json:"member_code"`
-	OrderCode     string                   `json:"order_code"`
 	Name          string                   `json:"name"`
 	Destination   string                   `json:"destination"`
 	Title         string                   `json:"title"`
@@ -32,7 +32,6 @@ func (r ItinMemberResponse) Transform(i model.MemberItinEnt) ItinMemberResponse 
 
 	r.ItinCode = i.ItinCode
 	r.MemberCode = i.MemberEnt.MemberCode
-	r.OrderCode = i.OrderCode
 	r.Name = i.MemberEnt.Name
 	r.Title = i.Title
 	r.Destination = i.Destination
@@ -45,7 +44,7 @@ func (r ItinMemberResponse) Transform(i model.MemberItinEnt) ItinMemberResponse 
 	r.Details = i.Details
 	r.GroupMembers = i.GroupMembers
 
-	if len(i.Img.String) > 0 {
+	if len(strings.TrimSpace(i.Img.String)) > 0 {
 		if IsUrl(i.Img.String) {
 			r.Img = i.Img.String
 		} else {

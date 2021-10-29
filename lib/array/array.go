@@ -31,6 +31,20 @@ func (s ArrStr) Remove(array []string, value string) []string {
 	return array
 }
 
+// Array Unique filtered
+func (s ArrStr) Unique(intSlice []string) []string {
+	keys := make(map[string]bool)
+	list := []string{}
+	for _, entry := range intSlice {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+
+	return list
+}
+
 // ArrUint struct
 type ArrUint uint
 
@@ -119,7 +133,7 @@ func (s ArrUint64) Remove(array []uint64, value uint64) []uint64 {
 }
 
 // ArrInt64 struct
-type ArrInt64 uint64
+type ArrInt64 int64
 
 // InArray check is in array
 func (s ArrInt64) InArray(val int64, array []int64) (exists bool, index int) {
@@ -139,6 +153,35 @@ func (s ArrInt64) InArray(val int64, array []int64) (exists bool, index int) {
 
 // Remove member array
 func (s ArrInt64) Remove(array []int64, value int64) []int64 {
+	isExist, index := s.InArray(value, array)
+	if isExist {
+		array = append(array[:index], array[(index+1):]...)
+	}
+
+	return array
+}
+
+// ArrUint32 struct
+type ArrInt32 int32
+
+// InArray check is in array
+func (s ArrInt32) InArray(val int32, array []int32) (exists bool, index int) {
+	exists = false
+	index = -1
+
+	for i, s := range array {
+		if s == val {
+			exists = true
+			index = i
+			return
+		}
+	}
+
+	return
+}
+
+// Remove member array
+func (s ArrInt32) Remove(array []int32, value int32) []int32 {
 	isExist, index := s.InArray(value, array)
 	if isExist {
 		array = append(array[:index], array[(index+1):]...)
@@ -210,4 +253,18 @@ func Remove(array interface{}, value interface{}) interface{} {
 	}
 
 	return array
+}
+
+// Array Unique filtered
+func (s ArrInt32) Unique(intSlice []int32) []int32 {
+	keys := make(map[int32]bool)
+	list := []int32{}
+	for _, entry := range intSlice {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+
+	return list
 }

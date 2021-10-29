@@ -2,6 +2,7 @@ package response
 
 import (
 	"panorama/services/api/model"
+	"strings"
 
 	"github.com/andanhm/go-prettytime"
 	"github.com/spf13/viper"
@@ -28,7 +29,7 @@ func (r UsersResponse) Transform(m model.UserEnt) UsersResponse {
 		t = m.LastVisit.Time.Format("Jan 02,2006")
 	}
 
-	if len(m.Img.String) > 0 {
+	if len(strings.TrimSpace(m.Img.String)) > 0 {
 		if IsUrl(m.Img.String) {
 			r.Img = m.Img.String
 		} else {
@@ -74,7 +75,7 @@ func (r TcDetailResponse) Transform(m model.UserEnt) TcDetailResponse {
 	r.LastSeen = prettytime.Format(m.LastVisit.Time)
 	r.SummaryActivityTc = r.SummaryActivityTc.Transform(m)
 
-	if len(m.Img.String) > 0 {
+	if len(strings.TrimSpace(m.Img.String)) > 0 {
 		if IsUrl(m.Img.String) {
 			r.Img = m.Img.String
 		} else {
@@ -143,7 +144,7 @@ func (r AdminDetailResponse) Transform(m model.UserEnt) AdminDetailResponse {
 	r.LastSeen = prettytime.Format(m.LastVisit.Time)
 	r.SummaryActivityAdmin = r.SummaryActivityAdmin.Transform(m)
 
-	if len(m.Img.String) > 0 {
+	if len(strings.TrimSpace(m.Img.String)) > 0 {
 		if IsUrl(m.Img.String) {
 			r.Img = m.Img.String
 		} else {

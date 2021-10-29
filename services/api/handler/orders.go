@@ -12,7 +12,6 @@ import (
 	"panorama/services/api/handler/request"
 	"panorama/services/api/handler/response"
 	"panorama/services/api/model"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -48,14 +47,15 @@ func (h *Contract) GetDetailItinOrderMember(w http.ResponseWriter, r *http.Reque
 // GetItinOrderMember ...
 func (h *Contract) GetListItinOrderMember(w http.ResponseWriter, r *http.Request) {
 	param := map[string]interface{}{
-		"page":         1,
-		"limit":        10,
-		"offset":       0,
-		"sort":         "desc",
-		"order":        "o.id",
-		"member_code":  "",
-		"expired_date": "",
-		"order_code":   "",
+		"page":        1,
+		"keyword":    "",
+		"limit":       10,
+		"offset":      0,
+		"sort":        "desc",
+		"order":       "o.id",
+		"order_code":  "",
+		"member_code": "",
+		"order_type": "",
 	}
 
 	if page, ok := r.URL.Query()["page"]; ok && len(page[0]) > 0 {
@@ -81,16 +81,20 @@ func (h *Contract) GetListItinOrderMember(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	if member_code, ok := r.URL.Query()["member_code"]; ok && len(member_code[0]) > 0 {
-		param["member_code"] = member_code[0]
-	}
-
-	if expired_date, ok := r.URL.Query()["expired_date"]; ok && len(expired_date[0]) > 0 {
-		param["expired_date"] = expired_date[0]
+	if keyword, ok := r.URL.Query()["keyword"]; ok && len(keyword[0]) > 0 {
+		param["keyword"] = keyword[0]
 	}
 
 	if order_code, ok := r.URL.Query()["order_code"]; ok && len(order_code[0]) > 0 {
 		param["order_code"] = order_code[0]
+	}
+
+	if member_code, ok := r.URL.Query()["member_code"]; ok && len(member_code[0]) > 0 {
+		param["member_code"] = member_code[0]
+	}
+
+	if order_type, ok := r.URL.Query()["order_type"]; ok && len(order_type[0]) > 0 {
+		param["order_type"] = order_type[0]
 	}
 
 	param["offset"] = (param["page"].(int) - 1) * param["limit"].(int)
@@ -125,6 +129,7 @@ func (h *Contract) GetListItinOrderMember(w http.ResponseWriter, r *http.Request
 func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 	// Initial response handler
 	var res response.ItinOrderMemberResponse
+	var orderSetter model.OrderEnt
 
 	// Binding request
 	req := request.OrderReq{}
@@ -156,23 +161,13 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Order setter request
-	orderSetter := model.OrderEnt{
-		TotalPrice:  int64(req.TotalPrice),
-		OrderStatus: model.ORDER_STATUS_PENDING,
-		OrderType:   model.ORDER_TYPE_REGULER,
-	}
-
-	// Assign member itin order into order setter
-	memberItin, _ := m.GetMemberItinByCode(db, ctx, req.MemberItinCode)
-	if memberItin.ID == 0 {
-		h.SendNotfound(w, fmt.Sprintf("Member itin %s not found.", req.MemberItinCode))
+	// get chat id
+	chat, _ := m.GetGroupChatByCode(db, ctx, req.ChatGroupCode)
+	if chat.ID == 0 {
+		h.SendNotfound(w, fmt.Sprintf("Room Chat %s not found.", req.ChatGroupCode))
 		tx.Rollback(ctx)
 		return
 	}
-	memberItin.EstPrice = sql.NullInt64{Int64: int64(req.TotalPrice), Valid: true}
-	orderSetter.MemberItinID = memberItin.ID
-	orderSetter.MemberItin = memberItin
 
 	// Assign member paid by into order setter
 	member, _ := m.GetMemberByCode(db, ctx, req.PaidByCode)
@@ -181,8 +176,6 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 		tx.Rollback(ctx)
 		return
 	}
-	orderSetter.PaidBy = member.ID
-	orderSetter.MemberEnt = member
 
 	// Assign tc into order setter
 	tcCode := h.GetUserCode(r.Context())
@@ -192,104 +185,28 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 		tx.Rollback(ctx)
 		return
 	}
+
+	// Order setter request
+	orderSetter.ChatID = chat.ID
+	orderSetter.TotalPrice = int64(req.TotalPrice)
+	orderSetter.TotalPricePpn = int64(req.TotalPricePPN)
+	orderSetter.Description = req.Description
+	orderSetter.OrderStatus = model.ORDER_STATUS_PENDING
+	orderSetter.Title = req.Title
+	orderSetter.PaidBy = member.ID
+	orderSetter.MemberEnt = member
 	orderSetter.TcID = userTc.ID
 	orderSetter.UserEnt = userTc
+	orderSetter.Details = req.Details
+	orderSetter.OrderType = req.OrderType
+	orderSetter.OrderCode = m.SetOrderCode()
 
-	// Append additional detail from request into member itin
-	additionalDetails := req.AdditionalDetails
-	var itinDetailTemp []map[string]interface{}
-	if len(additionalDetails) > 0 {
-		for i := 0; i < len(memberItin.Details); i++ {
-
-			for j := 0; j < len(additionalDetails); j++ {
-
-				md, err := json.Marshal(memberItin.Details)
-				if err != nil {
-					h.SendBadRequest(w, err.Error())
-					tx.Rollback(ctx)
-					return
-				}
-
-				temp, err := json.Marshal(itinDetailTemp)
-				if err != nil {
-					h.SendBadRequest(w, err.Error())
-					tx.Rollback(ctx)
-					return
-				}
-
-				if reflect.ValueOf(additionalDetails[j]["hotel"]).IsValid() {
-					if reflect.ValueOf(memberItin.Details[i]["hotel"]).IsValid() {
-						memberItin.Details[i]["hotel"] = additionalDetails[j]["hotel"]
-					} else {
-						if strings.Contains(string(md), "hotel") == false && strings.Contains(string(temp), "hotel") == false {
-							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
-						}
-					}
-				} else if reflect.ValueOf(additionalDetails[j]["others"]).IsValid() {
-					if reflect.ValueOf(memberItin.Details[i]["others"]).IsValid() {
-						memberItin.Details[i]["others"] = additionalDetails[j]["others"]
-					} else {
-						if strings.Contains(string(md), "others") == false && strings.Contains(string(temp), "others") == false {
-							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
-						}
-					}
-				} else if reflect.ValueOf(additionalDetails[j]["other"]).IsValid() {
-					if reflect.ValueOf(memberItin.Details[i]["other"]).IsValid() {
-						memberItin.Details[i]["other"] = additionalDetails[j]["other"]
-					} else {
-						if strings.Contains(string(md), "other") == false && strings.Contains(string(temp), "other") == false {
-							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
-						}
-					}
-				} else if reflect.ValueOf(additionalDetails[j]["flight"]).IsValid() {
-					if reflect.ValueOf(memberItin.Details[i]["flight"]).IsValid() {
-						memberItin.Details[i]["flight"] = additionalDetails[j]["flight"]
-					} else {
-						if strings.Contains(string(md), "flight") == false && strings.Contains(string(temp), "flight") == false {
-							itinDetailTemp = append(itinDetailTemp, additionalDetails[j])
-						}
-					}
-				}
-
-			}
-
-		}
-
-	}
-
-	for _, v := range itinDetailTemp {
-		memberItin.Details = append(memberItin.Details, v)
-	}
-
-	// Update member itin detail
-	_, err = m.UpdateMemberItin(tx, ctx, memberItin, memberItin.ItinCode)
+	// Create or Order
+	orderSaved, err := m.AddOrder(tx, ctx, orderSetter)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)
 		return
-	}
-
-	// Create or update if exist orders
-	orderExist, _ := m.GetOrderByMemberItinID(db, ctx, memberItin.ID)
-	orderSaved := model.OrderEnt{}
-	if orderExist.ID != 0 {
-		orderSaved, err = m.UpdateOrderByMemberItinID(tx, ctx, orderSetter, memberItin.ID)
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
-		}
-		orderSaved.OrderCode = orderExist.OrderCode
-		orderSaved.CreatedDate = orderExist.CreatedDate
-	} else {
-		orderSetter.MemberItinID = memberItin.ID
-		orderSetter.OrderCode = m.SetOrderCode()
-		orderSaved, err = m.AddOrder(tx, ctx, orderSetter)
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
-		}
 	}
 
 	// Activity user logging in process
@@ -316,7 +233,7 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 	}
 	notifContentMember := model.NotificationContent{
 		Subject:   model.NOTIF_SUBJ_ORDER_INCOME,
-		TripName:  memberItin.Title,
+		TripName:  req.Title,
 		OrderCode: orderSaved.OrderCode,
 	}
 	_, err = m.SendNotifications(tx, db, ctx, memberPlayers, notifContentMember)
@@ -335,7 +252,7 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 	}
 	notifContentUser := model.NotificationContent{
 		Subject:       model.NOTIF_SUBJ_ORDER_HISTORY,
-		TripName:      memberItin.Title,
+		TripName:      req.Title,
 		StatusPayment: model.PAYMENT_STATUS_PROCESS_DESC,
 	}
 	_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
@@ -356,14 +273,13 @@ func (h *Contract) AddOrderAct(w http.ResponseWriter, r *http.Request) {
 	h.SendSuccess(w, res.Transform(orderSaved), nil)
 }
 
-// UpdateOrderAct update payment process order from itinerary
+// UpdateOrderAct update payment process order from itinerary (tc)
 func (h *Contract) UpdateOrderAct(w http.ResponseWriter, r *http.Request) {
 	// Initial response handler
-	var res response.OrderPaymentResponse
 	code := chi.URLParam(r, "code")
 
 	// Binding request
-	req := request.OrderPaymentReq{}
+	req := request.OrderReqUpdate{}
 	if err := h.Bind(r, &req); err != nil {
 		h.SendBadRequest(w, err.Error())
 		return
@@ -393,7 +309,7 @@ func (h *Contract) UpdateOrderAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check paid by order
-	memberCode := h.GetUserCode(r.Context())
+	memberCode := req.PaidByCode
 	member, _ := m.GetMemberByCode(db, ctx, memberCode)
 	if member.ID == 0 {
 		h.SendNotfound(w, fmt.Sprintf("Member %s not found.", memberCode))
@@ -402,69 +318,29 @@ func (h *Contract) UpdateOrderAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check order data exist
-	orderExist, _ := m.GetOrderByOrderCode(db, ctx, code)
+	orderExist, _ := m.GetOrderByCodeDetail(db, ctx, code)
 	if orderExist.ID == 0 {
 		h.SendNotfound(w, fmt.Sprintf("Order %s not found.", code))
 		tx.Rollback(ctx)
 		return
 	}
 
-	// Check paid by order by request auth
-	if member.ID != orderExist.PaidBy {
-		h.SendNotfound(w, fmt.Sprintf("Order paid by %s is invalid.", memberCode))
+	checkPay, err := m.GetPaymentOrderByOrderID(db, ctx, orderExist.ID)
+	if checkPay.ID > 1 {
+		h.SendNotfound(w, fmt.Sprintf("payment order %s must be paid.", code))
 		tx.Rollback(ctx)
 		return
 	}
 
-	// Create order payment default set expired date
-	orderPaymentSetter := model.OrderPaymentEnt{
-		OrderID:       orderExist.ID,
-		Amount:        int64(req.Amount),
-		PaymentStatus: model.PAYMENT_STATUS_PROCESS,
-	}
+	// transform request
+	order := req.Transform(orderExist)
 
-	// Update url snap url midtrans
-	paymentService := payment.New(h.App)
-	orderCode := orderExist.OrderCode
-	orderAmount := int64(req.Amount)
-	paramMidtrans := paymentService.SetMidtransParam(member.Email, member.Name, orderCode, orderAmount)
-	midtransResponse, err := paymentService.GetMidtransPaymentURL(paramMidtrans)
+	order, err = m.UpdateOrderByCode(tx, ctx, order)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)
 		return
 	}
-	if midtransResponse["redirect_url"] == "" {
-		h.SendBadRequest(w, "failed to get snap url midtrans.")
-		tx.Rollback(ctx)
-		return
-	}
-	orderPaymentSetter.PaymentURL = midtransResponse["redirect_url"]
-
-	// Check order payment exist then saved, if exist = renew payment
-	orderPaymentSaved := model.OrderPaymentEnt{}
-	orderPayment, _ := m.GetPaymentOrderByOrderID(db, ctx, orderExist.ID)
-	if orderPayment.ID != 0 {
-		orderPaymentSetter.PaymentType = orderPayment.PaymentType
-		orderPaymentSetter.ExpiredDate = orderPayment.ExpiredDate
-		orderPaymentSetter.Payloads = orderPayment.Payloads
-		orderPaymentSaved, err = m.UpdateOrderPayment(tx, ctx, orderPaymentSetter, orderExist.ID)
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
-		}
-		orderPaymentSaved.CreatedDate = orderPayment.CreatedDate
-		orderPaymentSaved.ExpiredDate = orderPayment.ExpiredDate
-	} else {
-		orderPaymentSaved, err = m.AddOrderPayment(db, ctx, tx, orderPaymentSetter)
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
-		}
-	}
-	orderPaymentSaved.OrderCode = orderExist.OrderCode
 
 	// Activity user logging in process
 	log := model.LogActivityUserEnt{
@@ -508,7 +384,7 @@ func (h *Contract) UpdateOrderAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.SendSuccess(w, res.Transform(orderPaymentSaved), nil)
+	h.SendSuccess(w, nil, nil)
 }
 
 // AddMidtransNotificationAct update payment process from midtrans notification
@@ -567,13 +443,19 @@ func (h *Contract) AddMidtransNotificationAct(w http.ResponseWriter, r *http.Req
 
 	// Update order status
 	orderSetter := model.OrderEnt{
-		PaidBy:      order.PaidBy,
-		OrderStatus: orderStatus,
-		TotalPrice:  order.TotalPrice,
-		TcID:        order.TcID,
-		OrderType:   order.OrderType,
+		OrderCode:     order.OrderCode,
+		PaidBy:        order.PaidBy,
+		OrderStatus:   orderStatus,
+		TotalPrice:    order.TotalPrice,
+		TcID:          order.TcID,
+		OrderType:     order.OrderType,
+		Details:       order.Details,
+		Title:         order.Title,
+		ChatID:        order.ChatID,
+		Description:   order.Description,
+		TotalPricePpn: order.TotalPricePpn,
 	}
-	orderUpdated, err := m.UpdateOrderByMemberItinID(tx, ctx, orderSetter, order.MemberItinID)
+	orderUpdated, err := m.UpdateOrderByCode(tx, ctx, orderSetter)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
 		tx.Rollback(ctx)
@@ -716,4 +598,158 @@ func (h *Contract) AddMidtransNotificationAct(w http.ResponseWriter, r *http.Req
 	}
 
 	h.SendSuccess(w, req, nil)
+}
+
+// PostPaymentAct post payment process order (cust_app)
+func (h *Contract) PostPaymentAct(w http.ResponseWriter, r *http.Request) {
+	// Initial response handler
+	var res response.OrderPaymentResponse
+
+	// Binding request
+	req := request.OrderPaymentReq{}
+	if err := h.Bind(r, &req); err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// Validate request of struct request
+	if err := h.Validator.Driver.Struct(req); err != nil {
+		h.SendRequestValidationError(w, err.(validator.ValidationErrors))
+		return
+	}
+
+	// Check db context
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	// Model db transaction
+	m := model.Contract{App: h.App}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// Check paid by order
+	memberCode := h.GetUserCode(r.Context())
+	member, _ := m.GetMemberByCode(db, ctx, memberCode)
+	if member.ID == 0 {
+		h.SendNotfound(w, fmt.Sprintf("Member %s not found.", memberCode))
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Check order data exist
+	orderExist, _ := m.GetOrderByOrderCode(db, ctx, req.OrderCode)
+	if orderExist.ID == 0 {
+		h.SendNotfound(w, fmt.Sprintf("Order %s not found.", req.OrderCode))
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Check paid by order by request auth
+	if member.ID != orderExist.PaidBy {
+		h.SendNotfound(w, fmt.Sprintf("Order paid by %s is invalid.", memberCode))
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Create order payment default set expired date
+	orderPaymentSetter := model.OrderPaymentEnt{
+		OrderID:       orderExist.ID,
+		Amount:        int64(req.Amount),
+		PaymentStatus: model.PAYMENT_STATUS_PROCESS,
+	}
+
+	// Update url snap url midtrans
+	paymentService := payment.New(h.App)
+	orderCode := orderExist.OrderCode
+	orderAmount := int64(req.Amount)
+	paramMidtrans := paymentService.SetMidtransParam(member.Email, member.Name, orderCode, orderAmount)
+	midtransResponse, err := paymentService.GetMidtransPaymentURL(paramMidtrans)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	if midtransResponse["redirect_url"] == "" {
+		h.SendBadRequest(w, "failed to get snap url midtrans.")
+		tx.Rollback(ctx)
+		return
+	}
+	orderPaymentSetter.PaymentURL = midtransResponse["redirect_url"]
+
+	// Check order payment exist then saved, if exist = renew payment
+	orderPaymentSaved := model.OrderPaymentEnt{}
+	orderPayment, _ := m.GetPaymentOrderByOrderID(db, ctx, orderExist.ID)
+	if orderPayment.ID != 0 {
+		orderPaymentSetter.PaymentType = orderPayment.PaymentType
+		orderPaymentSetter.ExpiredDate = orderPayment.ExpiredDate
+		orderPaymentSetter.Payloads = orderPayment.Payloads
+		orderPaymentSaved, err = m.UpdateOrderPayment(tx, ctx, orderPaymentSetter, orderExist.ID)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+		orderPaymentSaved.CreatedDate = orderPayment.CreatedDate
+		orderPaymentSaved.ExpiredDate = orderPayment.ExpiredDate
+	} else {
+		orderPaymentSaved, err = m.AddOrderPayment(db, ctx, tx, orderPaymentSetter)
+		if err != nil {
+			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
+			return
+		}
+	}
+	orderPaymentSaved.OrderCode = orderExist.OrderCode
+
+	// Activity user logging in process
+	log := model.LogActivityUserEnt{
+		UserID:    int64(member.ID),
+		Role:      h.GetUserRole(r.Context()),
+		Title:     "Update Order",
+		Activity:  fmt.Sprintf("Update Order Payment Trip Itin For %s", member.Name),
+		EventType: r.Method,
+	}
+	_, err = m.AddLogActivity(tx, ctx, log)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To User (Admin, TC)
+	userPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentUser := model.NotificationContent{
+		Subject:       model.NOTIF_SUBJ_ORDER_HISTORY,
+		TripName:      orderExist.MemberItin.Title,
+		StatusPayment: model.PAYMENT_STATUS_PROCESS_METHOD_DESC,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Commit transaction
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	h.SendSuccess(w, res.Transform(orderPaymentSaved), nil)
 }

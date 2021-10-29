@@ -102,3 +102,11 @@ func (c *Contract) GetListMemberTemporaryByItinID(db *pgxpool.Conn, ctx context.
 
 	return mList, err
 }
+
+// DeleteMemberTempByEmailAndItinID delete member temp
+func (c *Contract) DeleteMemberTempByEmailAndItinID(tx pgx.Tx, ctx context.Context, email string, itinID int32) error {
+	sql := `delete from member_temporaries where email = $1 and member_itin_id = $2`
+	_, err := tx.Exec(ctx, sql, email, itinID)
+
+	return err
+}

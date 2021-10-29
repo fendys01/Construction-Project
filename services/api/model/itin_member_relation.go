@@ -36,10 +36,10 @@ func (c *Contract) AddMemberItinRelation(tx pgx.Tx, ctx context.Context, m Membe
 	return m, err
 }
 
-// UpdateMemberItinRelation update member itin relation
-func (c *Contract) SoftDeleteMemberItinRelation(db *pgxpool.Conn, ctx context.Context, tx pgx.Tx, m MemberItinRelationEnt, memberID int32) error {
-	sql := `UPDATE member_itin_relations SET deleted_date=$1 WHERE member_id=$2`
-	_, err := tx.Exec(ctx, sql, time.Now().In(time.UTC), memberID)
+// DeleteMemberItinRelation delete member itin relation
+func (c *Contract) DeleteMemberItinRelation(tx pgx.Tx, ctx context.Context, memberID, itinID int32) error {
+	sql := `delete from member_itin_relations where member_id = $1 and member_itin_id = $2`
+	_, err := tx.Exec(ctx, sql, memberID, itinID)
 
 	return err
 }
@@ -185,4 +185,28 @@ func (c *Contract) GetListMemberItinRelationByItinID(db *pgxpool.Conn, ctx conte
 	}
 
 	return mList, err
+}
+
+// GetListItinMemberRelationByItinID Get list member itin relation by itin ID
+func (c *Contract) GetListItinMemberRelationByItinID(db *pgxpool.Conn, ctx context.Context, itinID int32) ([]MemberItinRelationEnt, error) {
+	var list []MemberItinRelationEnt
+
+	sql := `SELECT id, member_itin_id, member_id, created_date FROM member_itin_relations WHERE member_itin_id = $1`
+
+	rows, err := db.Query(ctx, sql, itinID)
+	if err != nil {
+		return list, err
+	}
+
+	for rows.Next() {
+		var m MemberItinRelationEnt
+		err = rows.Scan(&m.ID, &m.MemberItinID, &m.MemberID, &m.CreatedDate)
+		if err != nil {
+			return list, err
+		}
+
+		list = append(list, m)
+	}
+
+	return list, err
 }

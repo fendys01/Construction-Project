@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/georgysavva/scany/pgxscan"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
@@ -100,6 +101,60 @@ func (c *Contract) AddNotif(tx pgx.Tx, ctx context.Context, n NotificationEnt) (
 	n.ID = lastInsID
 
 	return n, err
+}
+
+func (c *Contract) GetNotifByCode(db *pgxpool.Conn, ctx context.Context, code string) (NotificationEnt, error) {
+	var n NotificationEnt
+
+	err := pgxscan.Get(ctx, db, &n, "select * from notifications where code = $1 limit 1", code)
+	return n, err
+}
+
+func (c *Contract) GetNotifAll(db *pgxpool.Conn, ctx context.Context) (NotificationEnt, error) {
+	var n NotificationEnt
+
+	err := pgxscan.Get(ctx, db, &n, "select * from notifications")
+	return n, err
+}
+
+// UpdateIsReadNotificationsByCode ...
+func (c *Contract) UpdateIsReadNotificationByCode(tx pgx.Tx, ctx context.Context, code string, n NotificationEnt) error {
+
+	var ID int32
+
+	sql := `UPDATE notifications SET is_read= true WHERE code=$1 RETURNING id`
+
+	err := tx.QueryRow(ctx, sql, code).Scan(&ID)
+
+	return err
+}
+
+// Force Deleted Notification.
+func (c *Contract) ForceDeleteNotification(tx pgx.Tx, ctx context.Context, code string, n NotificationEnt) error {
+
+	var ID int32
+
+	sql := `delete from notifications where code=$1 RETURNING id`
+
+	err := tx.QueryRow(ctx, sql, code).Scan(&ID)
+
+	n.ID = ID
+
+	return err
+}
+
+// Force Deleted Notification.
+func (c *Contract) ForceDeleteAllNotification(tx pgx.Tx, ctx context.Context, n NotificationEnt) error {
+
+	var ID int32
+
+	sql := `delete from notifications RETURNING id`
+
+	err := tx.QueryRow(ctx, sql).Scan(&ID)
+
+	n.ID = ID
+
+	return err
 }
 
 // GetListNotification ...
@@ -543,6 +598,10 @@ func (c *Contract) SendNotifications(tx pgx.Tx, db *pgxpool.Conn, ctx context.Co
 		var notification NotificationEnt
 
 		for _, p := range players {
+
+			if len(p.PlayerID) <= 0 {
+				continue
+			}
 			// Send notification - Grouping player id into list
 			listPlayerID = append(listPlayerID, p.PlayerID)
 

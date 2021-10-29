@@ -1,0 +1,2 @@
+ALTER TABLE orders 
+    ADD COLUMN description VARCHAR(225) NULL;

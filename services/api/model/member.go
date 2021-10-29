@@ -65,6 +65,20 @@ func (c *Contract) UpdateIsActive(tx pgx.Tx, ctx context.Context, code string, u
 	return err
 }
 
+// Force Deleted Member.
+func (c *Contract) ForceDeleteMember(tx pgx.Tx, ctx context.Context, code string, u MemberEnt) error {
+
+	var ID int32
+
+	sql := `delete from members where member_code=$1 RETURNING id`
+
+	err := tx.QueryRow(ctx, sql, code).Scan(&ID)
+
+	u.ID = ID
+
+	return err
+}
+
 func (c *Contract) createMemberCode() string {
 	rand.Seed(time.Now().UnixNano())
 	code, _ := utils.Generate(`[a-z0-9]{6}`)
@@ -122,12 +136,15 @@ func (c *Contract) GetMemberByCode(db *pgxpool.Conn, ctx context.Context, code s
 
 func (c *Contract) GetMemberStatistikByCode(db *pgxpool.Conn, ctx context.Context, code string) (MemberEnt, error) {
 	var m MemberEnt
-	sql := `
-	select 
-		COUNT(CASE WHEN total_order = 0 THEN null else a.* END) as  total_tc,
-		SUM(total_order) as total_itenerary,
-		total_visited,
-		member_code, name,img, last_active_date  
+	sql := `select 
+		COUNT(
+			CASE 
+				WHEN total_order = 0 THEN null 
+				else a.* 
+			end
+		) total_tc,
+		SUM(total_order) total_itenerary,
+		total_visited, member_code, name,img, last_active_date  
 	from (
 		select 
 			member_code, members.name, members.img, l.last_active_date, total_visited,
@@ -135,16 +152,18 @@ func (c *Contract) GetMemberStatistikByCode(db *pgxpool.Conn, ctx context.Contex
 		from members 
 		left join member_itins mi on mi.created_by = members.id
 		left join log_visit_app l on l.user_id = members.id
-		left join orders o on o.member_itin_id = mi.id
+		left join chat_groups cg on cg.member_itin_id = mi.id and mi.deleted_date is null
+		left join orders o on o.chat_id = cg.id 
 		left join users us on us.id = o.tc_id
-		where member_code =  $1 and l.role = 'customer'
-		group by tc_id, members.id, l.id
+		where member_code = $1 and l.role = $2
+		group by o.tc_id, members.id, l.id
 	)a 
-	group by total_visited, member_code, name, img,last_active_date`
+	group by total_visited, member_code, name, img,last_active_date
+	order by last_active_date desc `
 
 	var a, b int32
 
-	err := db.QueryRow(ctx, sql, code).Scan(
+	err := db.QueryRow(ctx, sql, code, "customer").Scan(
 		&a, &b, &m.MemberStatistik.TotalVisited,
 		&m.MemberCode, &m.Name, &m.Img, &m.MemberStatistik.LastActiveDate)
 
@@ -157,6 +176,13 @@ func (c *Contract) GetMemberStatistikByCode(db *pgxpool.Conn, ctx context.Contex
 func (c *Contract) GetMemberByEmail(db *pgxpool.Conn, ctx context.Context, email string) (MemberEnt, error) {
 	var m MemberEnt
 	err := pgxscan.Get(ctx, db, &m, "select * from members where email=$1 limit 1", email)
+
+	return m, err
+}
+
+func (c *Contract) GetMemberByEmailUsernamePhone(db *pgxpool.Conn, ctx context.Context, email, username, phone string) (MemberEnt, error) {
+	var m MemberEnt
+	err := pgxscan.Get(ctx, db, &m, "select * from members where email=$1 or username=$2 or phone=$3 limit 1", email, username, phone)
 
 	return m, err
 }

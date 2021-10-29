@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"panorama/services/api/model"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -32,7 +33,7 @@ func (r DetailItinSugResponse) Transform(i model.ItinSugEnt) DetailItinSugRespon
 	r.Destination = i.Destination
 	r.Details = i.Details
 
-	if len(i.Img.String) > 0 {
+	if len(strings.TrimSpace(i.Img.String)) > 0 {
 		if IsUrl(i.Img.String) {
 			r.Img = i.Img.String
 		} else {
@@ -69,7 +70,7 @@ func (r ItinSugResponse) Transform(i model.ItinSugEnt) ItinSugResponse {
 	r.TotalVisited = i.View.Int32
 	r.Destination = i.Destination
 
-	if len(i.Img.String) > 0 {
+	if len(strings.TrimSpace(i.Img.String)) > 0 {
 		if IsUrl(i.Img.String) {
 			r.Img = i.Img.String
 		} else {

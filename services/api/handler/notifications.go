@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"panorama/lib/array"
 	"panorama/services/api/handler/response"
@@ -175,4 +176,160 @@ func (h *Contract) GetCounterNotifAct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.SendSuccess(w, counterNotif, param)
+}
+
+func (h *Contract) UpdateIsReadNotification(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	code := chi.URLParam(r, "code")
+	if len(code) == 0 {
+		h.SendBadRequest(w, "invalid code")
+		return
+	}
+
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	m := model.Contract{App: h.App}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	data, _ := m.GetNotifByCode(db, ctx, code)
+	if data.ID == 0 {
+		h.SendNotfound(w, "Notification not found.")
+		tx.Rollback(ctx)
+		return
+	}
+
+	// edit is read notif by code
+	err = m.UpdateIsReadNotificationByCode(tx, ctx, code, data)
+	if err != nil {
+		tx.Rollback(ctx)
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// Commit transaction
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+}
+
+func (h *Contract) DeleteNotificationAct(w http.ResponseWriter, r *http.Request) {
+	var err error
+	code := chi.URLParam(r, "code")
+	if len(code) == 0 {
+		h.SendBadRequest(w, "invalid code")
+		return
+	}
+
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	m := model.Contract{App: h.App}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	data, _ := m.GetNotifByCode(db, ctx, code)
+	if data.ID == 0 {
+		h.SendNotfound(w, "Notification not found.")
+		tx.Rollback(ctx)
+		return
+	}
+
+	// force Deleted Notification
+	err = m.ForceDeleteNotification(tx, ctx, code, data)
+	if err != nil {
+		h.SendBadRequest(w, "Delete notifications failed")
+		return
+	}
+
+	// Activity user logging in process
+	log := model.LogActivityUserEnt{
+		UserID:    int64(data.ID),
+		Role:      h.GetUserRole(r.Context()),
+		Title:     fmt.Sprintf("Delete %s", code),
+		Activity:  fmt.Sprintf("Delete notif %s", code),
+		EventType: r.Method,
+	}
+	_, err = m.AddLogActivity(tx, ctx, log)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Commit transaction
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	h.SendSuccess(w, h.EmptyJSONArr(), nil)
+}
+
+func (h *Contract) DeleteAllNotificationAct(w http.ResponseWriter, r *http.Request) {
+	var err error
+
+	ctx := context.Background()
+	db, err := h.DB.Acquire(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+	defer db.Release()
+
+	m := model.Contract{App: h.App}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	data, _ := m.GetNotifAll(db, ctx)
+	if data.ID == 0 {
+		h.SendNotfound(w, "Notification not found.")
+		tx.Rollback(ctx)
+		return
+	}
+
+	// force Deleted Notification
+	err = m.ForceDeleteAllNotification(tx, ctx, data)
+	if err != nil {
+		h.SendBadRequest(w, "Delete notifications failed")
+		return
+	}
+
+	// Commit transaction
+	err = tx.Commit(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	h.SendSuccess(w, h.EmptyJSONArr(), nil)
 }

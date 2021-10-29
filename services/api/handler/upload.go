@@ -15,7 +15,7 @@ import (
 // UploadAct ...
 func (h *Contract) UploadAct(w http.ResponseWriter, r *http.Request) {
 	fm, fInfo, err := upload.Info{MaxSize: 1}.MultipartHandler(
-		w, r, "uploadfile", []string{"png", "jpg", "jpeg"},
+		w, r, "uploadfile", []string{"png", "jpg", "jpeg", "pdf"},
 	)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())

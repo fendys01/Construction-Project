@@ -1,6 +1,6 @@
 CREATE TABLE stuff (
 	id serial PRIMARY KEY,
-    	code_stuff varchar(30) unique NOT NULL,
+    code_stuff varchar(30) unique NOT NULL,
 	name_stuff varchar(100) not null,
 	image varchar(200) null,
 	description varchar(100) not null,

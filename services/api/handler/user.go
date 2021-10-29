@@ -125,7 +125,7 @@ func (h *Contract) GetDetailAdminAndTc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if role, ok := r.URL.Query()["role"]; ok && role[0] == "admin" || role[0] == "tc" {
-		if ok == false {
+		if !ok {
 			h.SendBadRequest(w, "Role parameters between tc or admin")
 			return
 		}
@@ -217,9 +217,7 @@ func (h *Contract) GetDetailAdminAndTc(w http.ResponseWriter, r *http.Request) {
 		res = res.Transform(u)
 
 		h.SendSuccess(w, res, param)
-
 	}
-
 }
 
 // AddUserAct ...
@@ -538,10 +536,12 @@ func (h *Contract) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	data, err := m.GetUserByCode(db, ctx, code)
 	if err == sql.ErrNoRows {
 		h.SendNotfound(w, err.Error())
+		tx.Rollback(ctx)
 		return
 	}
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
 		return
 	}
 
@@ -552,71 +552,73 @@ func (h *Contract) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	err = m.UpdateUser(tx, ctx, code, data)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
 		return
 	}
 
-	// Send Notifications - To User (Admin)
 	if data.Role == "tc" {
-		adminPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "admin")
-		if err != nil {
-			h.SendBadRequest(w, err.Error())
-			tx.Rollback(ctx)
-			return
-		}
-		notifContent := model.NotificationContent{
-			TCName:  data.Name,
-			Subject: model.NOTIF_SUBJ_TC_REMOVE,
-		}
-		_, err = m.SendNotifications(tx, db, ctx, adminPlayers, notifContent)
-		if err != nil {
-			h.SendBadRequest(w, psql.ParseErr(err))
-			tx.Rollback(ctx)
-			return
-		}
-	}
-
-	if data.Role == "tc" {
-
 		// find tc id yang plg sedikit orderannya
-		id, err := m.GetTcIDLeastWorkByID(db, ctx, data.ID)
+		id, _, _, err := m.GetTcIDLeastWorkByID(db, ctx, data.ID)
 		if err != nil && err != sql.ErrNoRows {
 			h.SendBadRequest(w, err.Error())
+			tx.Rollback(ctx)
 			return
 		}
 
 		if id > 0 {
-
 			// find member itin berdasarkan tc id sebelumnya
-			arrItinID, err := m.GetMemberItinByTcID(db, ctx, data.ID)
+			listChatGroupID, err := m.GetListChatGroupByTcID(db, ctx, data.ID)
 			if err != nil && err != sql.ErrNoRows {
 				h.SendBadRequest(w, err.Error())
+				tx.Rollback(ctx)
 				return
 			}
 
 			// insert to table itin change
-			for _, v := range arrItinID {
-				err = m.ChangeTc(db, ctx, tx, model.MemberItinChangesEnt{MemberItinID: v, ChangedBy: "admin", ChangedUserID: id})
+			for _, chatGroup := range listChatGroupID {
+				chatGroupID := chatGroup.ID
+				itinID := chatGroup.MemberItin.ID
+
+				err = m.ChangeTc(db, ctx, tx, model.MemberItinChangesEnt{MemberItinID: itinID, ChangedBy: "admin", ChangedUserID: id})
 				if err != nil {
 					h.SendBadRequest(w, err.Error())
+					tx.Rollback(ctx)
 					return
 				}
 
-				err = m.UpdateTcIdOrder(db, ctx, tx, id, v)
+				err = m.UpdateTcIdOrder(db, ctx, tx, id, chatGroupID)
 				if err != nil {
 					h.SendBadRequest(w, err.Error())
+					tx.Rollback(ctx)
 					return
 				}
-
 			}
-
 		}
+	}
 
+	// Send Notifications - To User (Admin)
+	adminPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "admin")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContent := model.NotificationContent{
+		TCName:  data.Name,
+		Subject: model.NOTIF_SUBJ_TC_REMOVE,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, adminPlayers, notifContent)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
+		return
 	}
 
 	// Commit transaction
 	err = tx.Commit(ctx)
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
 		return
 	}
 

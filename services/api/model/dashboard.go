@@ -26,18 +26,15 @@ func (c *Contract) GetDashboardAdmin(db *pgxpool.Conn, ctx context.Context, para
 		select row_to_json(booked_trips) booked_trips
 		from (
 			select
-				count(mi.id) as total,	
+				count(o.id) as total,	
 				(
 					select 
-						count(mi.id)			
-					from member_itins mi 
-					join orders o on o.member_itin_id = mi.id
-					where mi.deleted_date is null
-					and mi.created_date between $1 and $2
+						count(o.id)			
+					from orders o 
+					where o.order_type = 'R'
+					and o.created_date between $1 and $2
 				) total_date
-			from member_itins mi
-			join orders o on o.member_itin_id = mi.id
-			where mi.deleted_date is null
+				from orders o
 		) booked_trips
 	),
 	(

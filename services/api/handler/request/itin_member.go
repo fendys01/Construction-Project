@@ -19,7 +19,6 @@ type MemberItinReq struct {
 	Img           string                   `json:"img"`
 	GroupChatCode string                   `json:"group_chat_code"`
 	GroupMembers  []map[string]interface{} `json:"group_members"`
-	OrderType     string                   `json:"order_type"`
 }
 
 func (req MemberItinReq) ToMemberItinEnt(isNew bool) (model.MemberItinEnt, error) {
