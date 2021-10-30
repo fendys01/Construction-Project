@@ -71,7 +71,7 @@ func (h *Contract) RegisterAct(w http.ResponseWriter, r *http.Request) {
 	member, _ := m.GetMemberByEmailUsernamePhone(db, ctx, req.Email, req.Username, req.Phone)
 
 	if member.ID != 0 {
-		h.SendBadRequest(w, "user already exists")
+		h.SendBadRequest(w, "user has been registered and need activated")
 		return
 	} else {
 		member, err = m.AddMember(tx, context.Background(), model.MemberEnt{
