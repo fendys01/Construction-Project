@@ -112,7 +112,7 @@ func (h *Contract) AddStuffAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	notifContentMember := model.NotificationContent{
-		SugItinTitle: stuff.Name,
+		StuffName: 	  stuff.Name,
 		Subject:      model.NOTIF_SUBJ_STUFF_NEW,
 	}
 	_, err = m.SendNotifications(tx, db, ctx, memberPlayers, notifContentMember)
