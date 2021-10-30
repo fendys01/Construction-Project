@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"panorama/lib/array"
+	"panorama/lib/psql"
 	"panorama/services/api/handler/request"
 	"panorama/services/api/handler/response"
 	"panorama/services/api/model"
@@ -40,6 +42,20 @@ func (h *Contract) AddStuffAct(w http.ResponseWriter, r *http.Request) {
 
 	m := model.Contract{App: h.App}
 	tx, err := db.Begin(ctx)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// Assign tc id
+	adminCode := h.GetUserCode(r.Context())
+	userAdmin, _ := m.GetUserByCode(db, ctx, adminCode)
+	if userAdmin.ID == 0 {
+		h.SendNotfound(w, fmt.Sprintf("User Admin %s not found.", adminCode))
+		tx.Rollback(ctx)
+		return
+	}
+
 	stuff, err := m.AddStuff(db, ctx, model.StuffEnt{
 		Name:  		  req.Name,
 		Image:        sql.NullString{String: req.Image, Valid: true},
@@ -51,6 +67,58 @@ func (h *Contract) AddStuffAct(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.SendBadRequest(w, err.Error())
+		return
+	}
+
+	// Activity user logging in process
+	log := model.LogActivityUserEnt{
+		UserID:    int64(userAdmin.ID),
+		Role:      userAdmin.Role,
+		Title:     stuff.Name,
+		Activity:  "Add New Stuff",
+		EventType: r.Method,
+	}
+	_, err = m.AddLogActivity(tx, ctx, log)
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+
+	// Send Notifications - To User (Admin, TC)
+	userPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentUser := model.NotificationContent{
+		AdminName:    userAdmin.Name,
+		StuffName: 	  stuff.Name,
+		Subject:      model.NOTIF_SUBJ_STUFF_NEW,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, userPlayers, notifContentUser)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
+		return
+	}
+	
+	// Send Notifications - To Member (Customer)
+	memberPlayers, err := m.GetListPlayerByUserCodeAndRole(db, ctx, "", "customer")
+	if err != nil {
+		h.SendBadRequest(w, err.Error())
+		tx.Rollback(ctx)
+		return
+	}
+	notifContentMember := model.NotificationContent{
+		SugItinTitle: stuff.Name,
+		Subject:      model.NOTIF_SUBJ_STUFF_NEW,
+	}
+	_, err = m.SendNotifications(tx, db, ctx, memberPlayers, notifContentMember)
+	if err != nil {
+		h.SendBadRequest(w, psql.ParseErr(err))
+		tx.Rollback(ctx)
 		return
 	}
 

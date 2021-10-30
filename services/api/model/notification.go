@@ -26,6 +26,7 @@ const (
 	NOTIF_TYPE_ADMIN                 = 6
 	NOTIF_TYPE_TC                    = 7
 	NOTIF_TYPE_CUSTOMER              = 8
+	NOTIF_TYPE_STUFF            	 = 9
 	NOTIF_SUBJ_CHAT_INCOME           = "Chat Incoming"
 	NOTIF_SUBJ_CHAT_UNREAD           = "Chat Unread"
 	NOTIF_SUBJ_CHAT_ROOM_ASSIGNED    = "New Chat Room Assigned"
@@ -39,6 +40,7 @@ const (
 	NOTIF_SUBJ_MBITIN_PRE            = "Pre-trip"
 	NOTIF_SUBJ_MBITIN_BEGIN          = "Trip Begins"
 	NOTIF_SUBJ_SUGGITIN_NEW          = "New Suggested Itinerary"
+	NOTIF_SUBJ_STUFF_NEW          	 = "New Stuff Added"
 	NOTIF_SUBJ_PROFILE_CHANGE        = "Change Profile Info"
 	NOTIF_SUBJ_ADMIN_ADD             = "New Admin Added"
 	NOTIF_SUBJ_TC_INVITED            = "TC Invited"
@@ -83,6 +85,7 @@ type NotificationContent struct {
 	TCName        string
 	AdminName     string
 	SugItinTitle  string
+	StuffName	  string
 }
 
 func (c *Contract) SetNotificationCode() string {
@@ -588,6 +591,17 @@ func (c *Contract) GetNotifSuggitinNew(userID int64, role, sugItinTitle, adminNa
 	return c.SetNotifContent(userID, NOTIF_TYPE_SUGGITIN, role, NOTIF_SUBJ_SUGGITIN_NEW, title, desc, "")
 }
 
+func (c *Contract) GetNotifStuffNew(userID int64, role, StuffName, adminName string) NotificationEnt {
+	var byAdminName string
+	if len(adminName) > 0 {
+		byAdminName = fmt.Sprintf(`by %s`, adminName)
+	}
+	title := "New stuff has been published"
+	desc := fmt.Sprintf(`Checkout "%s", a new stuff %s`, StuffName, byAdminName)
+
+	return c.SetNotifContent(userID, NOTIF_TYPE_STUFF, role, NOTIF_SUBJ_STUFF_NEW, title, desc, "")
+}
+
 func (c *Contract) SendNotifications(tx pgx.Tx, db *pgxpool.Conn, ctx context.Context, players []DeviceListEnt, content NotificationContent) ([]NotificationEnt, error) {
 	var listPlayerID []string
 	var notifications []NotificationEnt
@@ -654,6 +668,8 @@ func (c *Contract) SendNotifications(tx pgx.Tx, db *pgxpool.Conn, ctx context.Co
 				notifContent = c.GetNotifTcRemoved(p.UserID, p.Role, content.TCName)
 			case NOTIF_SUBJ_CUSTOMER_BANNED:
 				notifContent = c.GetNotifCustomerBanned(p.UserID, p.Role, content.CustomerName)
+			case NOTIF_SUBJ_STUFF_NEW:
+				notifContent = c.GetNotifStuffNew(p.UserID, p.Role, content.StuffName, content.AdminName)
 			default:
 				return nil, fmt.Errorf("%s", "invalid subject")
 			}
